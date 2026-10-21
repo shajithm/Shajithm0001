@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Interval Timer</string>
-    <string name="round_of">Round %1$d of %2$d</string>
-    <string name="total_left">Total left %1$s</string>
+    <string name="subtitle">An alarm at every interval, nonstop until the last round.</string>
+    <string name="interval">Interval</string>
+    <string name="interval_label">INTERVAL</string>
+    <string name="rounds">Rounds</string>
+    <string name="rounds_label">ROUNDS</string>
+    <string name="tap_to_type">Tap the number to set it exactly · hold − or + to change fast</string>
+    <string name="total_label">TOTAL TIME</string>
+    <string name="min">min</string>
+    <string name="sec">sec</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
-    <string name="start_again">Start again</string>
-    <string name="done">All rounds complete</string>
+    <string name="new_timer">New timer</string>
+    <string name="round_of">ROUND %1$d OF %2$d</string>
+    <string name="this_round">left in this round</string>
+    <string name="total_left">%1$s left in total</string>
+    <string name="total_time">%1$s total</string>
+    <string name="complete">COMPLETE</string>
+    <string name="done">Done</string>
+    <string name="rounds_done">All %1$d rounds finished</string>
+    <string name="done_notification">All %1$d rounds complete</string>
+    <string name="notification_progress">Round %1$d of %2$d · %3$s left</string>
 </resources>

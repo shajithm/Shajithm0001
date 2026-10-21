@@ -21,23 +21,21 @@ import android.os.Vibrator
 import android.os.VibratorManager
 
 /**
- * Runs one continuous 30-minute clock (10 rounds x 3 minutes).
+ * Runs one continuous clock of [rounds] x [roundMs].
  *
  * The countdown is derived from a single start timestamp, so playing the alarm
- * never pauses or delays it: at every 3-minute mark a short alarm plays while
+ * never pauses or delays it: at every interval mark a short alarm plays while
  * the clock keeps running straight into the next round.
  */
 class TimerService : Service() {
 
     companion object {
-        const val ROUNDS = 10
-        const val ROUND_MS = 3 * 60 * 1000L
-        const val TOTAL_MS = ROUNDS * ROUND_MS
-        const val ALARM_MS = 1500           // how long each alarm sounds
-
+        const val EXTRA_INTERVAL_MS = "interval_ms"
+        const val EXTRA_ROUNDS = "rounds"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
 
+        private const val MAX_ALARM_MS = 1500
         private const val CHANNEL_ID = "interval_timer"
         private const val NOTIFICATION_ID = 1
 
@@ -46,24 +44,34 @@ class TimerService : Service() {
             private set
         @Volatile var finished = false
             private set
+        @Volatile var roundMs = 3 * 60_000L
+            private set
+        @Volatile var rounds = 10
+            private set
 
         val isRunning get() = startedAt != 0L
+        val totalMs get() = roundMs * rounds
+
+        fun clearFinished() { finished = false }
 
         fun elapsed(): Long =
-            if (startedAt == 0L) 0L
-            else (SystemClock.elapsedRealtime() - startedAt).coerceAtMost(TOTAL_MS)
+            if (startedAt == 0L) { if (finished) totalMs else 0L }
+            else (SystemClock.elapsedRealtime() - startedAt).coerceAtMost(totalMs)
 
         /** 1-based round currently counting down. */
         fun currentRound(elapsed: Long): Int =
-            (elapsed / ROUND_MS + 1).toInt().coerceAtMost(ROUNDS)
+            (elapsed / roundMs + 1).toInt().coerceAtMost(rounds)
 
         /** Time left in the current round. */
         fun roundRemaining(elapsed: Long): Long =
-            if (elapsed >= TOTAL_MS) 0L else ROUND_MS - elapsed % ROUND_MS
+            if (elapsed >= totalMs) 0L else roundMs - elapsed % roundMs
 
+        /** mm:ss (or h:mm:ss), rounded up so a fresh 3:00 round reads 03:00. */
         fun format(ms: Long): String {
-            val totalSec = (ms + 999) / 1000      // round up so it reads 03:00 at start
-            return "%02d:%02d".format(totalSec / 60, totalSec % 60)
+            val s = (ms + 999) / 1000
+            val h = s / 3600
+            return if (h > 0) "%d:%02d:%02d".format(h, (s % 3600) / 60, s % 60)
+            else "%02d:%02d".format(s / 60, s % 60)
         }
     }
 
@@ -75,21 +83,22 @@ class TimerService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             val elapsed = elapsed()
-            val due = (elapsed / ROUND_MS).toInt().coerceAtMost(ROUNDS)
+            val due = (elapsed / roundMs).toInt().coerceAtMost(rounds)
             if (due > alarmsPlayed) {
                 alarmsPlayed = due
                 playAlarm()
             }
-            if (elapsed >= TOTAL_MS) {
+            if (elapsed >= totalMs) {
                 finished = true
                 startedAt = 0L
-                updateNotification("All $ROUNDS rounds complete")
+                updateNotification(getString(R.string.done_notification, rounds))
                 // Let the final alarm finish sounding before shutting down.
-                handler.postDelayed({ shutdown(keepNotification = true) }, ALARM_MS + 500L)
+                handler.postDelayed({ shutdown(keepNotification = true) }, MAX_ALARM_MS + 500L)
                 return
             }
             updateNotification(
-                "Round ${currentRound(elapsed)} of $ROUNDS · ${format(roundRemaining(elapsed))} left"
+                getString(R.string.notification_progress,
+                    currentRound(elapsed), rounds, format(roundRemaining(elapsed)))
             )
             // Wake just after the next whole second so round boundaries are hit on time.
             handler.postDelayed(this, 1000L - elapsed % 1000L + 5L)
@@ -101,14 +110,22 @@ class TimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> shutdown(keepNotification = false)
-            else -> if (!isRunning) begin()
+            else -> if (!isRunning) begin(
+                intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
+                intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds
+            )
         }
         return START_NOT_STICKY
     }
 
-    private fun begin() {
+    private fun begin(intervalMs: Long, count: Int) {
+        roundMs = intervalMs.coerceAtLeast(5_000L)
+        rounds = count.coerceIn(1, 99)
+
         createChannel()
-        val notification = buildNotification("Round 1 of $ROUNDS · ${format(ROUND_MS)} left")
+        val notification = buildNotification(
+            getString(R.string.notification_progress, 1, rounds, format(roundMs))
+        )
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -117,7 +134,7 @@ class TimerService : Service() {
 
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "IntervalTimer::run")
-            .apply { acquire(TOTAL_MS + 60_000L) }
+            .apply { acquire(totalMs + 60_000L) }
 
         tone = ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
         alarmsPlayed = 0
@@ -128,10 +145,9 @@ class TimerService : Service() {
 
     private fun playAlarm() {
         // Fire-and-forget: the tone plays on its own while the countdown continues.
-        tone?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, ALARM_MS)
-        vibrator()?.vibrate(
-            VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1)
-        )
+        val length = MAX_ALARM_MS.coerceAtMost((roundMs / 3).toInt())
+        tone?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, length)
+        vibrator()?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
     }
 
     private fun vibrator(): Vibrator? =
@@ -162,7 +178,7 @@ class TimerService : Service() {
 
     private fun createChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID, "Interval timer", NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID, getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW
         ).apply { setShowBadge(false) }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -183,17 +199,15 @@ class TimerService : Service() {
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setOngoing(!finished)
+            .setColor(0xFFFF6B4A.toInt())
             .setCategory(Notification.CATEGORY_ALARM)
             .apply {
-                if (!finished) addAction(
-                    Notification.Action.Builder(null, "Stop", stop).build()
-                )
+                if (!finished) addAction(Notification.Action.Builder(null, getString(R.string.stop), stop).build())
             }
             .build()
     }
 
     private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
     }
 }

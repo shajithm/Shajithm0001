@@ -1,51 +1,249 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212"
-    android:gravity="center"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:background="@color/background"
+    android:fitsSystemWindows="true">
 
-    <TextView
-        android:id="@+id/round"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#B0BEC5"
-        android:textSize="26sp" />
-
-    <TextView
-        android:id="@+id/countdown"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:fontFamily="monospace"
-        android:textColor="#FFFFFF"
-        android:textSize="96sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/total"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:textColor="#90A4AE"
-        android:textSize="18sp" />
-
-    <ProgressBar
-        android:id="@+id/progress"
-        style="@android:style/Widget.Material.ProgressBar.Horizontal"
+    <!-- ============ Setup screen ============ -->
+    <LinearLayout
+        android:id="@+id/setup"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:progressTint="#FF7043" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-    <Button
-        android:id="@+id/button"
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:paddingTop="32dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="32sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/subtitle"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp" />
+
+                <!-- Interval -->
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="32dp">
+
+                    <TextView
+                        style="@style/SectionLabel"
+                        android:text="@string/interval_label" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/interval_minus"
+                            style="@style/StepButton"
+                            android:contentDescription="Shorter interval"
+                            android:text="−" />
+
+                        <TextView
+                            android:id="@+id/interval_value"
+                            style="@style/StepValue"
+                            android:text="03:00" />
+
+                        <TextView
+                            android:id="@+id/interval_plus"
+                            style="@style/StepButton"
+                            android:contentDescription="Longer interval"
+                            android:text="+" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Rounds -->
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="16dp">
+
+                    <TextView
+                        style="@style/SectionLabel"
+                        android:text="@string/rounds_label" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/rounds_minus"
+                            style="@style/StepButton"
+                            android:contentDescription="Fewer rounds"
+                            android:text="−" />
+
+                        <TextView
+                            android:id="@+id/rounds_value"
+                            style="@style/StepValue"
+                            android:text="10" />
+
+                        <TextView
+                            android:id="@+id/rounds_plus"
+                            style="@style/StepButton"
+                            android:contentDescription="More rounds"
+                            android:text="+" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="@string/tap_to_type"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <!-- Total -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SectionLabel"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:text="@string/total_label" />
+
+                    <TextView
+                        android:id="@+id/total_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:fontFeatureSettings="tnum"
+                        android:text="30:00"
+                        android:textColor="@color/accent"
+                        android:textSize="22sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <TextView
+            android:id="@+id/start_button"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginStart="24dp"
+            android:layout_marginEnd="24dp"
+            android:layout_marginBottom="24dp"
+            android:background="@drawable/bg_primary"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:text="@string/start"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp" />
+    </LinearLayout>
+
+    <!-- ============ Running / finished screen ============ -->
+    <LinearLayout
+        android:id="@+id/run"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:layout_marginTop="40dp"
-        android:backgroundTint="#FF7043"
-        android:textColor="#FFFFFF"
-        android:textSize="20sp" />
-</LinearLayout>
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/round_label"
+            style="@style/SectionLabel"
+            android:layout_marginTop="24dp"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <com.example.intervaltimer.ProgressRing
+                android:id="@+id/ring"
+                android:layout_width="300dp"
+                android:layout_height="300dp"
+                android:layout_gravity="center" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/countdown"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-light"
+                    android:fontFeatureSettings="tnum"
+                    android:textColor="@color/text_primary"
+                    android:textSize="68sp" />
+
+                <TextView
+                    android:id="@+id/countdown_caption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <com.example.intervaltimer.RoundsBar
+            android:id="@+id/rounds_bar"
+            android:layout_width="match_parent"
+            android:layout_height="8dp" />
+
+        <TextView
+            android:id="@+id/total_left"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFeatureSettings="tnum"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/stop_button"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="32dp"
+            android:background="@drawable/bg_secondary"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp" />
+    </LinearLayout>
+</FrameLayout>
