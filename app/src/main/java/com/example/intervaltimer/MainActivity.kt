@@ -36,10 +36,9 @@ import java.util.Locale
 class MainActivity : Activity() {
 
     companion object {
-        private const val STEP_MS = 15_000L
-        private const val MIN_INTERVAL_MS = 5_000L
-        private const val MAX_INTERVAL_MS = 60 * 60_000L
         private const val MAX_ROUNDS = 99
+        private const val REQ_EXPORT = 10
+        private const val REQ_IMPORT = 11
     }
 
     private enum class Screen { LIST, EDIT }
@@ -112,10 +111,14 @@ class MainActivity : Activity() {
         presetContainer = findViewById(R.id.preset_container)
         emptyText = findViewById(R.id.empty_text)
         findViewById<View>(R.id.add_button).setOnClickListener { openEditor(null) }
+        findViewById<View>(R.id.menu_button).setOnClickListener { showMenu(it) }
 
         editView = findViewById(R.id.edit_screen)
         editTitle = findViewById(R.id.edit_title)
         nameInput = findViewById(R.id.name_input)
+        // One line to type, but long names wrap instead of scrolling sideways.
+        nameInput.setHorizontallyScrolling(false)
+        nameInput.maxLines = 3
         intervalValue = findViewById(R.id.interval_value)
         roundsValue = findViewById(R.id.rounds_value)
         totalValue = findViewById(R.id.total_value)
@@ -180,6 +183,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Pick up a run that continued while the app was closed.
+        TimerService.load(this)
+        if (TimerService.isRunning && !TimerService.serviceAlive) TimerService.resume(this)
         handler.post(refresh)
     }
 
@@ -210,7 +216,7 @@ class MainActivity : Activity() {
             item.findViewById<TextView>(R.id.preset_name).text = p.name
             item.findViewById<TextView>(R.id.preset_detail).text = getString(
                 R.string.preset_detail,
-                TimerService.format(p.intervalMs), p.rounds, TimerService.format(p.totalMs)
+                Durations.human(p.intervalMs), p.rounds, Durations.human(p.totalMs)
             )
             val sched = item.findViewById<TextView>(R.id.preset_schedule)
             if (p.scheduleOn) {
@@ -336,9 +342,7 @@ class MainActivity : Activity() {
     }
 
     private fun changeInterval(direction: Int) {
-        val steps = if (direction > 0) intervalMs / STEP_MS + 1
-                    else (intervalMs + STEP_MS - 1) / STEP_MS - 1
-        intervalMs = (steps * STEP_MS).coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
+        intervalMs = Durations.step(intervalMs, direction)
         updateEditor()
     }
 
@@ -348,32 +352,37 @@ class MainActivity : Activity() {
     }
 
     private fun updateEditor() {
-        intervalValue.text = TimerService.format(intervalMs)
+        val text = TimerService.format(intervalMs)
+        intervalValue.text = text
+        intervalValue.textSize = when { text.length <= 5 -> 44f; text.length <= 8 -> 36f; else -> 26f }
         roundsValue.text = rounds.toString()
-        totalValue.text = TimerService.format(intervalMs * rounds)
+        totalValue.text = Durations.human(intervalMs * rounds)
     }
 
     private fun pickInterval() {
         hideKeyboard()
-        val totalSec = (intervalMs / 1000).toInt()
-        val minutes = picker(0, 60, totalSec / 60)
-        val seconds = picker(0, 59, totalSec % 60).apply { setFormatter { "%02d".format(it) } }
+        val totalSec = intervalMs / 1000
+        val two = NumberPicker.Formatter { "%02d".format(it) }
+        val days = picker(0, Durations.MAX_DAYS, (totalSec / 86_400).toInt())
+        val hours = picker(0, 23, ((totalSec % 86_400) / 3600).toInt()).apply { setFormatter(two) }
+        val minutes = picker(0, 59, ((totalSec % 3600) / 60).toInt()).apply { setFormatter(two) }
+        val seconds = picker(0, 59, (totalSec % 60).toInt()).apply { setFormatter(two) }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, dp(16), 0, 0)
+            setPadding(dp(8), dp(16), dp(8), 0)
+            addView(column(days, getString(R.string.days_unit)))
+            addView(column(hours, getString(R.string.hours_unit)))
             addView(column(minutes, getString(R.string.min)))
-            addView(TextView(context).apply {
-                text = ":"; textSize = 28f; setPadding(dp(12), 0, dp(12), dp(20))
-            })
             addView(column(seconds, getString(R.string.sec)))
         }
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(R.string.interval)
             .setView(row)
             .setPositiveButton(android.R.string.ok) { _, _ ->
-                intervalMs = ((minutes.value * 60L + seconds.value) * 1000L)
-                    .coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
+                intervalMs = (days.value * Durations.DAY + hours.value * Durations.HOUR +
+                    minutes.value * Durations.MINUTE + seconds.value * Durations.SECOND)
+                    .coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
                 updateEditor()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -404,6 +413,7 @@ class MainActivity : Activity() {
     private fun column(picker: NumberPicker, label: String) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         addView(picker)
         addView(TextView(context).apply { text = label; gravity = Gravity.CENTER })
     }
@@ -539,19 +549,119 @@ class MainActivity : Activity() {
             ring.setRingColor(getColor(R.color.success))
             roundLabel.text = getString(R.string.complete)
             countdown.text = getString(R.string.done)
+            countdown.textSize = 68f
             countdownCaption.text = getString(R.string.rounds_done, n)
-            totalLeft.text = getString(R.string.total_time, TimerService.format(total))
+            totalLeft.text = getString(R.string.total_time, Durations.human(total))
             stopButton.text = getString(R.string.back_to_timers)
         } else {
             val remaining = TimerService.roundRemaining(e)
             ring.setRingColor(getColor(R.color.accent))
             ring.fraction = remaining.toFloat() / TimerService.roundMs
             roundLabel.text = getString(R.string.round_of, TimerService.currentRound(e), n)
-            countdown.text = TimerService.format(remaining)
+            val text = TimerService.format(remaining)
+            countdown.text = text
+            countdown.textSize = when { text.length <= 5 -> 68f; text.length <= 8 -> 52f; else -> 36f }
             countdownCaption.text = getString(R.string.this_round)
             totalLeft.text = getString(R.string.total_left, TimerService.format(total - e))
             stopButton.text = getString(R.string.stop)
         }
+    }
+
+    // ---- Export / import ----
+
+    private fun showMenu(anchor: View) {
+        android.widget.PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, R.string.export_timers)
+            menu.add(0, 2, 1, R.string.import_timers)
+            setOnMenuItemClickListener {
+                when (it.itemId) { 1 -> exportTimers(); 2 -> importTimers() }
+                true
+            }
+        }.show()
+    }
+
+    private fun exportTimers() {
+        if (store.all().isEmpty()) {
+            Toast.makeText(this, R.string.nothing_to_export, Toast.LENGTH_SHORT).show()
+            return
+        }
+        @Suppress("DEPRECATION")
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "interval-timers-${LocalDate.now()}.json"),
+            REQ_EXPORT
+        )
+    }
+
+    private fun importTimers() {
+        @Suppress("DEPRECATION")
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain", "application/octet-stream")),
+            REQ_IMPORT
+        )
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) return
+        when (requestCode) {
+            REQ_EXPORT -> try {
+                val presets = store.all()
+                contentResolver.openOutputStream(uri, "wt")!!.use {
+                    it.write(PresetStore.exportJson(presets).toByteArray())
+                }
+                Toast.makeText(this, resources.getQuantityString(
+                    R.plurals.exported, presets.size, presets.size), Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, R.string.export_failed, Toast.LENGTH_LONG).show()
+            }
+
+            REQ_IMPORT -> try {
+                val text = contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                val incoming = PresetStore.parseImport(text)
+                if (incoming.isEmpty()) {
+                    Toast.makeText(this, R.string.import_empty, Toast.LENGTH_LONG).show()
+                } else {
+                    confirmImport(incoming)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, R.string.import_failed, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun confirmImport(incoming: List<Preset>) {
+        val n = incoming.size
+        val builder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(resources.getQuantityString(R.plurals.import_title, n, n))
+            .setMessage(R.string.import_message)
+            .setPositiveButton(R.string.import_add) { _, _ -> applyImport(incoming, replace = false) }
+            .setNegativeButton(android.R.string.cancel, null)
+        if (store.all().isNotEmpty()) {
+            builder.setNeutralButton(R.string.import_replace) { _, _ -> applyImport(incoming, replace = true) }
+        }
+        builder.show()
+    }
+
+    private fun applyImport(incoming: List<Preset>, replace: Boolean) {
+        val existing = if (replace) emptyList() else store.all()
+        if (replace) store.all().forEach { Scheduler.cancel(this, it.id) }
+        val (merged, added) = PresetStore.merge(existing, incoming, store.newId())
+        store.replaceAll(merged)
+        Scheduler.scheduleAll(this)
+        buildList()
+        val skipped = incoming.size - added
+        val msg = resources.getQuantityString(R.plurals.imported, added, added) +
+            (if (skipped > 0) " " + resources.getQuantityString(R.plurals.skipped, skipped, skipped) else "")
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     }
 
     // ---- Helpers ----

@@ -193,6 +193,7 @@ object Scheduler {
             val p = store.get(intent.getLongExtra(EXTRA_ID, -1L)) ?: return
             if (!p.scheduleOn) return
 
+            TimerService.load(context)
             if (!TimerService.isRunning) {
                 context.startForegroundService(
                     Intent(context, TimerService::class.java)
@@ -216,6 +217,9 @@ object Scheduler {
 
     /** Re-arms schedules after a reboot, app update, or time / time-zone change. */
     class RescheduleReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) = scheduleAll(context)
+        override fun onReceive(context: Context, intent: Intent) {
+            scheduleAll(context)
+            TimerService.resume(context)   // continue a timer that was running before the restart
+        }
     }
 }

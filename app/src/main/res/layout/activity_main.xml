@@ -27,13 +27,35 @@
                 android:paddingEnd="24dp"
                 android:paddingBottom="16dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:fontFamily="sans-serif-medium"
-                    android:text="@string/app_name"
-                    android:textColor="@color/text_primary"
-                    android:textSize="32sp" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-medium"
+                        android:text="@string/app_name"
+                        android:textColor="@color/text_primary"
+                        android:textSize="32sp" />
+
+                    <TextView
+                        android:id="@+id/menu_button"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginEnd="-12dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:clickable="true"
+                        android:contentDescription="@string/more_options"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:text="⋮"
+                        android:textColor="@color/text_primary"
+                        android:textSize="26sp" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -156,16 +178,19 @@
                 <EditText
                     android:id="@+id/name_input"
                     android:layout_width="match_parent"
-                    android:layout_height="56dp"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:maxLines="3"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="14dp"
                     android:layout_marginTop="10dp"
                     android:background="@drawable/bg_input"
                     android:hint="@string/name_hint"
                     android:imeOptions="actionDone"
                     android:inputType="textCapSentences"
-                    android:maxLength="40"
+                    android:maxLength="100"
                     android:paddingStart="18dp"
                     android:paddingEnd="18dp"
-                    android:singleLine="true"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary"
                     android:textCursorDrawable="@null"
@@ -454,7 +479,8 @@
             android:layout_marginTop="16dp"
             android:ellipsize="end"
             android:fontFamily="sans-serif-medium"
-            android:maxLines="1"
+            android:gravity="center"
+            android:maxLines="2"
             android:textColor="@color/text_primary"
             android:textSize="24sp" />
 

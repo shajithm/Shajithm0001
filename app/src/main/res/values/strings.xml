@@ -69,4 +69,34 @@
     <string name="exact_title">Allow exact alarms</string>
     <string name="exact_message">To start your timer exactly on time, allow “Alarms &amp; reminders” for Interval Timer.</string>
     <string name="open_settings">Open settings</string>
+
+    <string name="days_unit">days</string>
+    <string name="hours_unit">hours</string>
+    <string name="notification_round">Round %1$d of %2$d · %3$s each · next alarm in</string>
+    <string name="more_options">More options</string>
+    <string name="export_timers">Export timers</string>
+    <string name="import_timers">Import timers</string>
+    <string name="nothing_to_export">There are no timers to export yet</string>
+    <string name="export_failed">Couldn’t save the file</string>
+    <string name="import_failed">That file couldn’t be read. Choose a file made with “Export timers”.</string>
+    <string name="import_empty">That file has no timers in it</string>
+    <string name="import_message">Add them to your current timers, or replace your current timers with them?</string>
+    <string name="import_add">Add</string>
+    <string name="import_replace">Replace all</string>
+    <plurals name="exported">
+        <item quantity="one">Exported %d timer</item>
+        <item quantity="other">Exported %d timers</item>
+    </plurals>
+    <plurals name="import_title">
+        <item quantity="one">Import %d timer?</item>
+        <item quantity="other">Import %d timers?</item>
+    </plurals>
+    <plurals name="imported">
+        <item quantity="one">Imported %d timer.</item>
+        <item quantity="other">Imported %d timers.</item>
+    </plurals>
+    <plurals name="skipped">
+        <item quantity="one">Skipped %d you already had.</item>
+        <item quantity="other">Skipped %d you already had.</item>
+    </plurals>
 </resources>

@@ -32,4 +32,6 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Real org.json for unit tests (Android's version is stubbed off-device)
+    testImplementation("org.json:json:20240303")
 }
