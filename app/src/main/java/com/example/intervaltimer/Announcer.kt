@@ -2,6 +2,9 @@ package com.example.intervaltimer
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import java.util.Locale
@@ -24,6 +27,8 @@ enum class VoiceChoice(
 /** Speaks short announcements with the chosen voice, at alarm volume. */
 class Announcer(context: Context) : TextToSpeech.OnInitListener {
 
+    private val audio = context.applicationContext.getSystemService(AudioManager::class.java)
+
     private val tts: TextToSpeech
     private var ready = false
     private var pending: String? = null
@@ -44,12 +49,6 @@ class Announcer(context: Context) : TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status != TextToSpeech.SUCCESS) return
         ready = true
-        tts.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build()
-        )
         apply()
         pending?.let { say(it) }
         pending = null
@@ -70,7 +69,38 @@ class Announcer(context: Context) : TextToSpeech.OnInitListener {
     }
 
     private fun say(text: String) {
+        routeAudio()
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "announce")
+    }
+
+    /**
+     * Android plays "alarm" sounds on the speaker even when earphones are in. So with
+     * earphones connected, speak as media (earphones only, media volume); otherwise speak
+     * as an alarm (loud speaker, alarm volume). Checked each time, so plugging in or
+     * removing earphones mid-run is followed.
+     */
+    private fun routeAudio() {
+        val usage = if (earphonesConnected()) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_ALARM
+        tts.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(usage)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
+    }
+
+    fun earphonesConnected(): Boolean {
+        val types = mutableSetOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+        )
+        if (Build.VERSION.SDK_INT >= 28) types += AudioDeviceInfo.TYPE_HEARING_AID
+        if (Build.VERSION.SDK_INT >= 31) types += AudioDeviceInfo.TYPE_BLE_HEADSET
+        return runCatching {
+            audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in types }
+        }.getOrDefault(false)
     }
 
     private fun apply() {

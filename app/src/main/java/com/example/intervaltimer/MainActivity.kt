@@ -94,10 +94,13 @@ class MainActivity : Activity() {
     private lateinit var setDefaultInterval: TextView
     private lateinit var setDefaultRounds: TextView
     private lateinit var setWeekStart: TextView
-    private lateinit var setFloatingSwitch: Switch
-    private lateinit var setFloatingHint: TextView
-    private lateinit var setVoice: TextView
-    private var updatingSettings = false
+    // "While running" options of the timer being edited
+    private var floating = false
+    private var voice = VoiceChoice.OFF
+    private lateinit var editFloatingSwitch: Switch
+    private lateinit var editFloatingHint: TextView
+    private lateinit var editVoice: TextView
+    private var updatingSwitch = false
     private var previewAnnouncer: Announcer? = null
 
     // Run screen
@@ -191,20 +194,22 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.set_week_start_row).setOnClickListener { pickWeekStart() }
 
-        setFloatingSwitch = findViewById(R.id.set_floating_switch)
-        setFloatingHint = findViewById(R.id.set_floating_hint)
-        setVoice = findViewById(R.id.set_voice)
-        findViewById<View>(R.id.set_floating_row).setOnClickListener {
-            if (AppSettings.floatingWindow(this) && !FloatingWindow.permitted(this)) askOverlayPermission()
-            else setFloatingSwitch.toggle()
+        editFloatingSwitch = findViewById(R.id.edit_floating_switch)
+        editFloatingHint = findViewById(R.id.edit_floating_hint)
+        editVoice = findViewById(R.id.edit_voice)
+        findViewById<View>(R.id.edit_floating_row).setOnClickListener {
+            hideKeyboard()
+            if (floating && !FloatingWindow.permitted(this)) askOverlayPermission()
+            else editFloatingSwitch.toggle()
         }
-        setFloatingSwitch.setOnCheckedChangeListener { _, on ->
-            if (updatingSettings) return@setOnCheckedChangeListener
-            AppSettings.setFloatingWindow(this, on)
+        editFloatingSwitch.setOnCheckedChangeListener { _, on ->
+            if (updatingSwitch) return@setOnCheckedChangeListener
+            hideKeyboard()
+            floating = on
             if (on && !FloatingWindow.permitted(this)) askOverlayPermission()
-            updateSettings()
+            updateWhileRunning()
         }
-        findViewById<View>(R.id.set_voice_row).setOnClickListener { pickVoice() }
+        findViewById<View>(R.id.edit_voice_row).setOnClickListener { hideKeyboard(); pickVoice() }
 
         runView = findViewById(R.id.run_screen)
         runName = findViewById(R.id.run_name)
@@ -235,7 +240,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (screen == Screen.SETTINGS) updateSettings()   // e.g. back from the permission screen
+        if (screen == Screen.SETTINGS) updateSettings()
+        if (screen == Screen.EDIT) updateWhileRunning()   // e.g. back from the permission screen
         // Pick up a run that continued while the app was closed.
         TimerService.load(this)
         if (TimerService.isRunning && !TimerService.serviceAlive) TimerService.resume(this)
@@ -290,7 +296,7 @@ class MainActivity : Activity() {
             item.findViewById<TextView>(R.id.preset_detail).text = getString(
                 R.string.preset_detail,
                 Durations.human(p.intervalMs), p.rounds, Durations.human(p.totalMs)
-            )
+            ) + (if (p.voice != VoiceChoice.OFF) "  ·  🔊" else "") + (if (p.floating) "  ·  ⧉" else "")
             val sched = item.findViewById<TextView>(R.id.preset_schedule)
             if (p.scheduleOn) {
                 val next = Scheduler.nextText(this, p)
@@ -316,6 +322,9 @@ class MainActivity : Activity() {
         intervalMs = preset?.intervalMs ?: AppSettings.defaultIntervalMs(this)
         rounds = preset?.rounds ?: AppSettings.defaultRounds(this)
         sound = preset?.sound ?: ""
+        floating = preset?.floating ?: false
+        voice = preset?.voice ?: VoiceChoice.OFF
+        updateWhileRunning()
         updateSound()
         schedOn = preset?.scheduleOn ?: false
         schedHour = preset?.hour ?: 7
@@ -360,6 +369,8 @@ class MainActivity : Activity() {
         date = schedDate,
         days = schedDays,
         sound = sound,
+        floating = floating,
+        voice = voice,
     )
 
     /** Saves the editor's values and returns the saved preset, or null if the schedule is invalid. */
@@ -617,14 +628,7 @@ class MainActivity : Activity() {
 
     private fun startTimer(p: Preset) {
         hideKeyboard()
-        startForegroundService(
-            Intent(this, TimerService::class.java)
-                .setAction(TimerService.ACTION_START)
-                .putExtra(TimerService.EXTRA_NAME, p.name)
-                .putExtra(TimerService.EXTRA_SOUND, p.sound)
-                .putExtra(TimerService.EXTRA_INTERVAL_MS, p.intervalMs)
-                .putExtra(TimerService.EXTRA_ROUNDS, p.rounds)
-        )
+        startForegroundService(TimerService.startIntent(this, p))
     }
 
     private fun render() {
@@ -727,19 +731,22 @@ class MainActivity : Activity() {
         setDefaultRounds.text = (if (n == 0) getString(R.string.not_set) else n.toString()) + "  ›"
         setWeekStart.text = AppSettings.weekStart(this)
             .getDisplayName(TextStyle.FULL, Locale.getDefault()) + "  ›"
+    }
 
-        val floating = AppSettings.floatingWindow(this)
-        updatingSettings = true
-        setFloatingSwitch.isChecked = floating
-        updatingSettings = false
+    // ---- "While running" options (per timer) ----
+
+    private fun updateWhileRunning() {
+        updatingSwitch = true
+        editFloatingSwitch.isChecked = floating
+        updatingSwitch = false
         if (floating && !FloatingWindow.permitted(this)) {
-            setFloatingHint.text = getString(R.string.floating_needs_permission)
-            setFloatingHint.setTextColor(getColor(R.color.accent))
+            editFloatingHint.text = getString(R.string.floating_needs_permission)
+            editFloatingHint.setTextColor(getColor(R.color.accent))
         } else {
-            setFloatingHint.text = getString(R.string.floating_hint)
-            setFloatingHint.setTextColor(getColor(R.color.text_secondary))
+            editFloatingHint.text = getString(R.string.floating_hint)
+            editFloatingHint.setTextColor(getColor(R.color.text_secondary))
         }
-        setVoice.text = getString(AppSettings.voice(this).label) + "  ›"
+        editVoice.text = getString(voice.label) + "  ›"
     }
 
     private fun askOverlayPermission() {
@@ -761,10 +768,10 @@ class MainActivity : Activity() {
         val labels = options.map { getString(it.label) }.toTypedArray()
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(R.string.voice_title)
-            .setSingleChoiceItems(labels, options.indexOf(AppSettings.voice(this))) { d, which ->
+            .setSingleChoiceItems(labels, options.indexOf(voice)) { d, which ->
                 val choice = options[which]
-                AppSettings.setVoice(this, choice)
-                updateSettings()
+                voice = choice
+                updateWhileRunning()
                 d.dismiss()
                 if (choice != VoiceChoice.OFF) previewVoice(choice)
             }

@@ -65,7 +65,7 @@ class PresetsJsonTest {
     private val a = Preset(1, "Morning workout", 3 * MINUTE, 10)
     private val b = Preset(2, "Medication every 2 days", 2 * DAY, 15, scheduleOn = true,
         hour = 8, minute = 30, repeat = Repeat.DAYS, date = LocalDate.of(2026, 11, 1), days = 0b0010101,
-        sound = "content://media/internal/audio/media/42")
+        sound = "content://media/internal/audio/media/42", floating = true, voice = VoiceChoice.MALE_2)
 
     @Test fun exportThenImportGivesSameTimers() {
         val back = PresetStore.parseImport(PresetStore.exportJson(listOf(a, b)))
@@ -75,6 +75,8 @@ class PresetsJsonTest {
     @Test fun oldFilesWithoutSoundUseBeep() {
         val p = PresetStore.parseImport("""{"timers":[{"name":"Old","interval":180000,"rounds":10}]}""")[0]
         assertEquals("", p.sound)
+        assertEquals(false, p.floating)
+        assertEquals(VoiceChoice.OFF, p.voice)
     }
 
     @Test fun importsBareList() {

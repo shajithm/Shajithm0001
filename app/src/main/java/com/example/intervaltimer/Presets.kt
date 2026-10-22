@@ -24,6 +24,10 @@ data class Preset(
     val days: Int = WEEKDAYS,
     /** Alarm sound: a ringtone URI from the phone, or "" for the built-in beep. */
     val sound: String = "",
+    /** Show the floating mini window for this timer when the app is minimized. */
+    val floating: Boolean = false,
+    /** Voice for this timer's announcements (OFF = silent). */
+    val voice: VoiceChoice = VoiceChoice.OFF,
 ) {
     val totalMs get() = intervalMs * rounds
 
@@ -41,6 +45,7 @@ class PresetStore(context: Context) {
 
     fun all(): List<Preset> {
         val raw = prefs.getString(KEY, null) ?: return seed()
+        if (!prefs.getBoolean(MIGRATED_PER_TIMER, false)) return migratePerTimer(raw)
         return try {
             val arr = JSONArray(raw)
             (0 until arr.length()).map { i -> fromJson(arr.getJSONObject(i)) }
@@ -71,6 +76,23 @@ class PresetStore(context: Context) {
         prefs.edit().putString(KEY, arr.toString()).apply()
     }
 
+    /**
+     * The floating window and voice used to be app-wide settings. Copy whatever was
+     * chosen there onto every existing timer, once.
+     */
+    private fun migratePerTimer(raw: String): List<Preset> {
+        val floating = prefs.getBoolean("floating_window", false)
+        val voice = runCatching { VoiceChoice.valueOf(prefs.getString("voice", "OFF")!!) }
+            .getOrDefault(VoiceChoice.OFF)
+        val list = runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { fromJson(arr.getJSONObject(it)).copy(floating = floating, voice = voice) }
+        }.getOrDefault(emptyList())
+        write(list)
+        prefs.edit().putBoolean(MIGRATED_PER_TIMER, true).apply()
+        return list
+    }
+
     /** First launch: carry over the settings from the first version as the first preset. */
     private fun seed(): List<Preset> {
         val first = Preset(
@@ -80,11 +102,13 @@ class PresetStore(context: Context) {
             rounds = prefs.getInt("rounds", 10),
         )
         write(listOf(first))
+        prefs.edit().putBoolean(MIGRATED_PER_TIMER, true).apply()
         return listOf(first)
     }
 
     companion object {
         private const val KEY = "presets"
+        private const val MIGRATED_PER_TIMER = "migrated_per_timer_options"
         private const val FORMAT = "interval-timer-presets"
 
         fun toJson(p: Preset): JSONObject = JSONObject()
@@ -99,6 +123,8 @@ class PresetStore(context: Context) {
             .put("date", p.date.toString())
             .put("days", p.days)
             .put("sound", p.sound)
+            .put("floating", p.floating)
+            .put("voice", p.voice.name)
 
         /** Reads one timer, clamping values so a hand-edited file can't break the app. */
         fun fromJson(o: JSONObject) = Preset(
@@ -113,6 +139,8 @@ class PresetStore(context: Context) {
             date = runCatching { LocalDate.parse(o.optString("date")) }.getOrDefault(LocalDate.now()),
             days = o.optInt("days", Preset.WEEKDAYS) and Preset.ALL_DAYS,
             sound = o.optString("sound", ""),
+            floating = o.optBoolean("floating", false),
+            voice = runCatching { VoiceChoice.valueOf(o.optString("voice")) }.getOrDefault(VoiceChoice.OFF),
         )
 
         /** The file written by Export. */

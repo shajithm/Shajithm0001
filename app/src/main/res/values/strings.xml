@@ -104,14 +104,14 @@
     <string name="need_both">Please set the interval to at least 5 seconds and at least 1 round.</string>
     <string name="while_running_label">WHILE A TIMER RUNS</string>
     <string name="floating_window">Floating mini window</string>
-    <string name="floating_hint">Shows the round and countdown over other apps when you leave Interval Timer. Drag to move, tap to open, ✕ to hide.</string>
+    <string name="floating_hint">Shows this timer’s round and countdown over other apps when you leave Interval Timer. Drag to move, tap to open, ✕ to hide.</string>
     <string name="floating_needs_permission">Needs permission: tap to allow “Display over other apps”.</string>
     <string name="overlay_title">Allow the floating window</string>
     <string name="overlay_message">To show the mini window over other apps, turn on “Display over other apps” (on Xiaomi also “Display pop-up windows while running in the background”) for Interval Timer.</string>
     <string name="float_round">ROUND %1$d / %2$d</string>
     <string name="hide">Hide</string>
     <string name="voice_title">Voice announcements</string>
-    <string name="voice_hint">Speaks at the start, after every round (e.g. “Round 3 of 10 complete. 7 rounds, 21 minutes left.”) and at the end. Choosing a voice plays a sample.</string>
+    <string name="voice_hint">Speaks at the start, after every round (e.g. “Round 3 of 10 complete. 7 rounds, 21 minutes left.”) and at the end. Choosing a voice plays a sample. With earphones connected you’ll hear it only in the earphones (at media volume); otherwise on the speaker (at alarm volume).</string>
     <string name="voice_off">Off</string>
     <string name="voice_female_1">Female voice 1</string>
     <string name="voice_female_2">Female voice 2</string>

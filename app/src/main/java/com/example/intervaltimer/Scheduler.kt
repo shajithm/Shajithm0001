@@ -195,15 +195,7 @@ object Scheduler {
 
             TimerService.load(context)
             if (!TimerService.isRunning) {
-                context.startForegroundService(
-                    Intent(context, TimerService::class.java)
-                        .setAction(TimerService.ACTION_START)
-                        .putExtra(TimerService.EXTRA_NAME, p.name)
-                        .putExtra(TimerService.EXTRA_SOUND, p.sound)
-                        .putExtra(TimerService.EXTRA_INTERVAL_MS, p.intervalMs)
-                        .putExtra(TimerService.EXTRA_ROUNDS, p.rounds)
-                        .putExtra(TimerService.EXTRA_SCHEDULED, true)
-                )
+                context.startForegroundService(TimerService.startIntent(context, p, scheduled = true))
             }
 
             if (p.repeat == Repeat.ONCE) {

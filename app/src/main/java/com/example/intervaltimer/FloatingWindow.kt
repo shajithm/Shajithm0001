@@ -52,7 +52,7 @@ object FloatingWindow {
         val c = context.applicationContext
         appContext = c
         if (root != null || appVisible || !TimerService.isRunning) return
-        if (!AppSettings.floatingWindow(c) || !permitted(c)) return
+        if (!TimerService.floating || !permitted(c)) return   // this timer's own setting
         if (dismissedRun == TimerService.startedAt) return
         runCatching { build(c) }
     }

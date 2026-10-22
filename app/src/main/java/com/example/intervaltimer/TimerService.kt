@@ -40,6 +40,8 @@ class TimerService : Service() {
         const val EXTRA_NAME = "name"
         const val EXTRA_SCHEDULED = "scheduled"
         const val EXTRA_SOUND = "sound"
+        const val EXTRA_FLOATING = "floating"
+        const val EXTRA_VOICE = "voice"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
         const val ACTION_TICK = "com.example.intervaltimer.TICK"
@@ -65,6 +67,22 @@ class TimerService : Service() {
             private set
         @Volatile var sound = ""
             private set
+        @Volatile var floating = false
+            private set
+        @Volatile var voice = VoiceChoice.OFF
+            private set
+
+        /** Intent that starts [p] (from the app, or from a scheduled alarm). */
+        fun startIntent(context: Context, p: Preset, scheduled: Boolean = false): Intent =
+            Intent(context, TimerService::class.java)
+                .setAction(ACTION_START)
+                .putExtra(EXTRA_NAME, p.name)
+                .putExtra(EXTRA_SOUND, p.sound)
+                .putExtra(EXTRA_INTERVAL_MS, p.intervalMs)
+                .putExtra(EXTRA_ROUNDS, p.rounds)
+                .putExtra(EXTRA_FLOATING, p.floating)
+                .putExtra(EXTRA_VOICE, p.voice.name)
+                .putExtra(EXTRA_SCHEDULED, scheduled)
         @Volatile private var played = 0
         @Volatile var serviceAlive = false
             private set
@@ -95,6 +113,8 @@ class TimerService : Service() {
             if (!p.getBoolean("active", false)) return
             name = p.getString("name", "") ?: ""
             sound = p.getString("sound", "") ?: ""
+            floating = p.getBoolean("floating", false)
+            voice = runCatching { VoiceChoice.valueOf(p.getString("voice", "OFF")!!) }.getOrDefault(VoiceChoice.OFF)
             roundMs = p.getLong("roundMs", roundMs)
             rounds = p.getInt("rounds", rounds)
             played = p.getInt("played", 0)
@@ -140,7 +160,10 @@ class TimerService : Service() {
                     intent?.getStringExtra(EXTRA_SOUND) ?: "",
                     intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
                     intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds,
-                    intent?.getBooleanExtra(EXTRA_SCHEDULED, false) ?: false
+                    intent?.getBooleanExtra(EXTRA_SCHEDULED, false) ?: false,
+                    intent?.getBooleanExtra(EXTRA_FLOATING, false) ?: false,
+                    runCatching { VoiceChoice.valueOf(intent?.getStringExtra(EXTRA_VOICE) ?: "OFF") }
+                        .getOrDefault(VoiceChoice.OFF)
                 ) else check()
             }
             else -> {   // TICK, RESTORE, or a restart by the system (null intent)
@@ -154,9 +177,14 @@ class TimerService : Service() {
         return START_STICKY
     }
 
-    private fun begin(presetName: String, soundUri: String, intervalMs: Long, count: Int, scheduled: Boolean) {
+    private fun begin(
+        presetName: String, soundUri: String, intervalMs: Long, count: Int, scheduled: Boolean,
+        showFloating: Boolean, voiceChoice: VoiceChoice,
+    ) {
         name = presetName
         sound = soundUri
+        floating = showFloating
+        voice = voiceChoice
         roundMs = intervalMs.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
         rounds = count.coerceIn(1, 99)
         played = 0
@@ -283,11 +311,11 @@ class TimerService : Service() {
 
     private var announcer: Announcer? = null
 
-    private fun voiceOn() = AppSettings.voice(this) != VoiceChoice.OFF
+    private fun voiceOn() = voice != VoiceChoice.OFF
 
     /** Speaks [text] after [delayMs] (so it follows the alarm sound), if voice is on. */
     private fun announce(text: String, delayMs: Long) {
-        val choice = AppSettings.voice(this)
+        val choice = voice
         if (choice == VoiceChoice.OFF) return
         val a = announcer ?: Announcer(this).also { announcer = it }
         a.setChoice(choice)
@@ -334,6 +362,8 @@ class TimerService : Service() {
             .putBoolean("active", true)
             .putString("name", name)
             .putString("sound", sound)
+            .putBoolean("floating", floating)
+            .putString("voice", voice.name)
             .putLong("roundMs", roundMs)
             .putInt("rounds", rounds)
             .putLong("start", startedAt)
