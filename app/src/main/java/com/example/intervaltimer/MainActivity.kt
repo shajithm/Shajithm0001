@@ -94,6 +94,11 @@ class MainActivity : Activity() {
     private lateinit var setDefaultInterval: TextView
     private lateinit var setDefaultRounds: TextView
     private lateinit var setWeekStart: TextView
+    private lateinit var setFloatingSwitch: Switch
+    private lateinit var setFloatingHint: TextView
+    private lateinit var setVoice: TextView
+    private var updatingSettings = false
+    private var previewAnnouncer: Announcer? = null
 
     // Run screen
     private lateinit var runView: View
@@ -186,6 +191,21 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.set_week_start_row).setOnClickListener { pickWeekStart() }
 
+        setFloatingSwitch = findViewById(R.id.set_floating_switch)
+        setFloatingHint = findViewById(R.id.set_floating_hint)
+        setVoice = findViewById(R.id.set_voice)
+        findViewById<View>(R.id.set_floating_row).setOnClickListener {
+            if (AppSettings.floatingWindow(this) && !FloatingWindow.permitted(this)) askOverlayPermission()
+            else setFloatingSwitch.toggle()
+        }
+        setFloatingSwitch.setOnCheckedChangeListener { _, on ->
+            if (updatingSettings) return@setOnCheckedChangeListener
+            AppSettings.setFloatingWindow(this, on)
+            if (on && !FloatingWindow.permitted(this)) askOverlayPermission()
+            updateSettings()
+        }
+        findViewById<View>(R.id.set_voice_row).setOnClickListener { pickVoice() }
+
         runView = findViewById(R.id.run_screen)
         runName = findViewById(R.id.run_name)
         ring = findViewById(R.id.ring)
@@ -215,10 +235,28 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (screen == Screen.SETTINGS) updateSettings()   // e.g. back from the permission screen
         // Pick up a run that continued while the app was closed.
         TimerService.load(this)
         if (TimerService.isRunning && !TimerService.serviceAlive) TimerService.resume(this)
         handler.post(refresh)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        FloatingWindow.appVisible = true
+        FloatingWindow.hide(this)
+    }
+
+    override fun onStop() {
+        FloatingWindow.appVisible = false
+        FloatingWindow.show(this)   // only if the timer is running and the option is on
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        previewAnnouncer?.shutdown()
+        super.onDestroy()
     }
 
     override fun onPause() {
@@ -689,6 +727,58 @@ class MainActivity : Activity() {
         setDefaultRounds.text = (if (n == 0) getString(R.string.not_set) else n.toString()) + "  ›"
         setWeekStart.text = AppSettings.weekStart(this)
             .getDisplayName(TextStyle.FULL, Locale.getDefault()) + "  ›"
+
+        val floating = AppSettings.floatingWindow(this)
+        updatingSettings = true
+        setFloatingSwitch.isChecked = floating
+        updatingSettings = false
+        if (floating && !FloatingWindow.permitted(this)) {
+            setFloatingHint.text = getString(R.string.floating_needs_permission)
+            setFloatingHint.setTextColor(getColor(R.color.accent))
+        } else {
+            setFloatingHint.text = getString(R.string.floating_hint)
+            setFloatingHint.setTextColor(getColor(R.color.text_secondary))
+        }
+        setVoice.text = getString(AppSettings.voice(this).label) + "  ›"
+    }
+
+    private fun askOverlayPermission() {
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.overlay_title)
+            .setMessage(R.string.overlay_message)
+            .setPositiveButton(R.string.open_settings) { _, _ ->
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")))
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun pickVoice() {
+        val options = VoiceChoice.values()
+        val labels = options.map { getString(it.label) }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.voice_title)
+            .setSingleChoiceItems(labels, options.indexOf(AppSettings.voice(this))) { d, which ->
+                val choice = options[which]
+                AppSettings.setVoice(this, choice)
+                updateSettings()
+                d.dismiss()
+                if (choice != VoiceChoice.OFF) previewVoice(choice)
+            }
+            .show()
+    }
+
+    /** Plays a sample so the user can hear the chosen voice. */
+    private fun previewVoice(choice: VoiceChoice) {
+        val a = previewAnnouncer ?: Announcer(this).also { previewAnnouncer = it }
+        a.setChoice(choice)
+        a.speak(Announcements.round(3, 10, 21 * Durations.MINUTE))
+        handler.postDelayed({
+            if (a.isReady && !a.realVoice) Toast.makeText(this, R.string.voice_fallback, Toast.LENGTH_LONG).show()
+        }, 2500L)
     }
 
     // ---- Export / import ----

@@ -135,3 +135,31 @@ class WeekStartTest {
         assertEquals(java.util.Calendar.SATURDAY, AppSettings.calendarDay(java.time.DayOfWeek.SATURDAY))
     }
 }
+
+class AnnouncementsTest {
+    @Test fun spokenDurations() {
+        assertEquals("21 minutes", Announcements.spoken(21 * MINUTE))
+        assertEquals("1 minute", Announcements.spoken(MINUTE))
+        assertEquals("1 hour 30 minutes", Announcements.spoken(90 * MINUTE))
+        assertEquals("2 days 4 hours", Announcements.spoken(2 * DAY + 4 * HOUR))
+        assertEquals("1 day", Announcements.spoken(DAY))
+        assertEquals("45 seconds", Announcements.spoken(45 * SECOND))
+        assertEquals("1 minute 1 second", Announcements.spoken(61 * SECOND))
+    }
+
+    @Test fun startText() {
+        assertEquals("Starting Morning workout. 10 rounds of 3 minutes.",
+            Announcements.start("Morning workout", 10, 3 * MINUTE))
+        assertEquals("Starting. 1 round of 2 hours.", Announcements.start("", 1, 2 * HOUR))
+        assertEquals("Starting. 5 rounds of 1 minute.", Announcements.start("n".repeat(60), 5, MINUTE))
+    }
+
+    @Test fun roundText() {
+        assertEquals("Round 3 of 10 complete. 7 rounds, 21 minutes left.",
+            Announcements.round(3, 10, 21 * MINUTE))
+        assertEquals("Round 9 of 10 complete. 1 round, 3 minutes left.",
+            Announcements.round(9, 10, 3 * MINUTE))
+        assertEquals("All 10 rounds complete. Well done.", Announcements.round(10, 10, 0))
+        assertEquals("Round complete. Well done.", Announcements.round(1, 1, 0))
+    }
+}

@@ -148,6 +148,7 @@ class TimerService : Service() {
                 goForeground()
                 if (!isRunning) { shutdown(keepNotification = false); return START_NOT_STICKY }
                 check()
+                if (!FloatingWindow.appVisible) FloatingWindow.show(this)
             }
         }
         return START_STICKY
@@ -171,7 +172,9 @@ class TimerService : Service() {
             // Without exact alarms, keep the CPU awake instead (fine for shorter runs).
             longWakeLock = wakeLock("IntervalTimer::run").apply { acquire(totalMs + 60_000L) }
         }
+        announce(Announcements.start(name, rounds, roundMs), if (scheduled) 600L else 0L)
         check()
+        if (!FloatingWindow.appVisible) FloatingWindow.show(this)
     }
 
     /** Plays any alarm that is due, arms the next one, and refreshes the notification. */
@@ -185,7 +188,10 @@ class TimerService : Service() {
             val lateBy = now - (startedAt + due * roundMs)
             played = due
             save()
-            if (lateBy < LATE_LIMIT_MS) playAlarm()
+            if (lateBy < LATE_LIMIT_MS) {
+                val alarmLength = playAlarm()
+                announce(Announcements.round(due, rounds, totalMs - due * roundMs), alarmLength + 300L)
+            }
         }
         if (e >= totalMs) { finish(); return }
 
@@ -203,7 +209,9 @@ class TimerService : Service() {
         cancelBoundary()
         updateNotification(0L)
         // Let the final alarm finish sounding before shutting down.
-        handler.postDelayed({ shutdown(keepNotification = true) }, RINGTONE_MS + 500L)
+        // Let the final alarm (and announcement) finish before shutting down.
+        val wait = if (voiceOn()) RINGTONE_MS + 7_000L else RINGTONE_MS + 500L
+        handler.postDelayed({ shutdown(keepNotification = true) }, wait)
     }
 
     private fun stopRun() {
@@ -211,6 +219,7 @@ class TimerService : Service() {
         finished = false
         clearSaved()
         cancelBoundary()
+        FloatingWindow.hide(this)
         shutdown(keepNotification = false)
     }
 
@@ -253,11 +262,12 @@ class TimerService : Service() {
     private var ringtoneUri = ""
     private val stopRingtone = Runnable { ringtone?.stop() }
 
-    private fun playAlarm() {
+    /** Plays the round alarm and returns how long it sounds (ms). */
+    private fun playAlarm(): Long {
         // Fire-and-forget: the sound plays on its own while the countdown continues.
         val ring = customRingtone()
         val length = (if (ring != null) RINGTONE_MS else BEEP_MS).coerceAtMost(roundMs / 3)
-        shortWake(length)
+        shortWake(length + if (voiceOn()) 7_000L else 0L)
         val played = ring != null && runCatching {
             handler.removeCallbacks(stopRingtone)
             ring.stop()
@@ -266,6 +276,22 @@ class TimerService : Service() {
         }.isSuccess
         if (!played) tone()?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, length.toInt())
         vibrator()?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
+        return length
+    }
+
+    // ---------- Voice ----------
+
+    private var announcer: Announcer? = null
+
+    private fun voiceOn() = AppSettings.voice(this) != VoiceChoice.OFF
+
+    /** Speaks [text] after [delayMs] (so it follows the alarm sound), if voice is on. */
+    private fun announce(text: String, delayMs: Long) {
+        val choice = AppSettings.voice(this)
+        if (choice == VoiceChoice.OFF) return
+        val a = announcer ?: Announcer(this).also { announcer = it }
+        a.setChoice(choice)
+        handler.postDelayed({ a.speak(text) }, delayMs)
     }
 
     /** The timer's chosen ringtone, or null for the built-in beep (or if it can't be loaded). */
@@ -325,6 +351,8 @@ class TimerService : Service() {
         handler.removeCallbacksAndMessages(null)
         ringtone?.stop()
         ringtone = null
+        announcer?.shutdown()
+        announcer = null
         tone?.release()
         tone = null
         longWakeLock?.takeIf { it.isHeld }?.release()
@@ -337,6 +365,7 @@ class TimerService : Service() {
         serviceAlive = false
         handler.removeCallbacksAndMessages(null)
         ringtone?.stop()
+        announcer?.shutdown()
         tone?.release()
         longWakeLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()

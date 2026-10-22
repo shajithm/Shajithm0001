@@ -59,3 +59,37 @@ object Durations {
         return next.coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
     }
 }
+
+/** Words spoken by the voice announcements (plain Kotlin, unit-tested). */
+object Announcements {
+
+    /** "21 minutes", "1 hour 30 minutes", "2 days 4 hours", "45 seconds". */
+    fun spoken(ms: Long): String {
+        val s = (ms.coerceAtLeast(0) + 999) / 1000
+        val parts = listOf(
+            s / 86_400 to "day", (s % 86_400) / 3600 to "hour", (s % 3600) / 60 to "minute", s % 60 to "second"
+        )
+        val first = parts.indexOfFirst { it.first > 0 }
+        if (first < 0) return "0 seconds"
+        return parts.drop(first).take(2).filter { it.first > 0 }
+            .joinToString(" ") { (n, unit) -> "$n $unit" + if (n == 1L) "" else "s" }
+    }
+
+    /** At the start: "Starting Morning workout. 10 rounds of 3 minutes." */
+    fun start(name: String, rounds: Int, roundMs: Long): String {
+        val who = if (name.isNotBlank() && name.length <= 40) "Starting $name." else "Starting."
+        val r = if (rounds == 1) "1 round" else "$rounds rounds"
+        return "$who $r of ${spoken(roundMs)}."
+    }
+
+    /**
+     * After round [done] of [rounds] ends:
+     * "Round 3 of 10 complete. 7 rounds, 21 minutes left." or "All 10 rounds complete."
+     */
+    fun round(done: Int, rounds: Int, remainingMs: Long): String {
+        if (done >= rounds) return if (rounds == 1) "Round complete. Well done." else "All $rounds rounds complete. Well done."
+        val left = rounds - done
+        val r = if (left == 1) "1 round" else "$left rounds"
+        return "Round $done of $rounds complete. $r, ${spoken(remainingMs)} left."
+    }
+}
