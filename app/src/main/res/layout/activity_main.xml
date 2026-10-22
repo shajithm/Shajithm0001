@@ -5,9 +5,9 @@
     android:background="@color/background"
     android:fitsSystemWindows="true">
 
-    <!-- ============ Setup screen ============ -->
+    <!-- ============ List of saved timers ============ -->
     <LinearLayout
-        android:id="@+id/setup"
+        android:id="@+id/list_screen"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
@@ -39,14 +39,142 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="@string/subtitle"
+                    android:layout_marginBottom="28dp"
+                    android:text="@string/list_subtitle"
                     android:textColor="@color/text_secondary"
                     android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/empty_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="48dp"
+                    android:gravity="center"
+                    android:text="@string/empty"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/preset_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </ScrollView>
+
+        <TextView
+            android:id="@+id/add_button"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginStart="24dp"
+            android:layout_marginEnd="24dp"
+            android:layout_marginBottom="24dp"
+            android:background="@drawable/bg_primary"
+            android:clickable="true"
+            android:focusable="true"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:text="@string/add_timer"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp" />
+    </LinearLayout>
+
+    <!-- ============ Create / edit a timer ============ -->
+    <LinearLayout
+        android:id="@+id/edit_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/back_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/back"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="←"
+                android:textColor="@color/text_primary"
+                android:textSize="24sp" />
+
+            <TextView
+                android:id="@+id/edit_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp" />
+
+            <TextView
+                android:id="@+id/delete_button"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:text="@string/delete"
+                android:textColor="@color/accent"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="16dp">
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:text="@string/name_label" />
+
+                <EditText
+                    android:id="@+id/name_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/name_hint"
+                    android:imeOptions="actionDone"
+                    android:inputType="textCapSentences"
+                    android:maxLength="40"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:singleLine="true"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary"
+                    android:textCursorDrawable="@null"
+                    android:textSize="18sp" />
 
                 <!-- Interval -->
                 <LinearLayout
                     style="@style/Card"
-                    android:layout_marginTop="32dp">
+                    android:layout_marginTop="24dp">
 
                     <TextView
                         style="@style/SectionLabel"
@@ -67,8 +195,7 @@
 
                         <TextView
                             android:id="@+id/interval_value"
-                            style="@style/StepValue"
-                            android:text="03:00" />
+                            style="@style/StepValue" />
 
                         <TextView
                             android:id="@+id/interval_plus"
@@ -102,8 +229,7 @@
 
                         <TextView
                             android:id="@+id/rounds_value"
-                            style="@style/StepValue"
-                            android:text="10" />
+                            style="@style/StepValue" />
 
                         <TextView
                             android:id="@+id/rounds_plus"
@@ -122,11 +248,10 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
-                <!-- Total -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="28dp"
+                    android:layout_marginTop="24dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -142,33 +267,54 @@
                         android:layout_height="wrap_content"
                         android:fontFamily="sans-serif-medium"
                         android:fontFeatureSettings="tnum"
-                        android:text="30:00"
                         android:textColor="@color/accent"
                         android:textSize="22sp" />
                 </LinearLayout>
             </LinearLayout>
         </ScrollView>
 
-        <TextView
-            android:id="@+id/start_button"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginStart="24dp"
-            android:layout_marginEnd="24dp"
-            android:layout_marginBottom="24dp"
-            android:background="@drawable/bg_primary"
-            android:clickable="true"
-            android:focusable="true"
-            android:fontFamily="sans-serif-medium"
-            android:gravity="center"
-            android:text="@string/start"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:id="@+id/save_button"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_marginEnd="12dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_secondary"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="@string/save"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/start_now_button"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_primary"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="@string/save_and_start"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp" />
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- ============ Running / finished screen ============ -->
+    <!-- ============ Running / finished ============ -->
     <LinearLayout
-        android:id="@+id/run"
+        android:id="@+id/run_screen"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center_horizontal"
@@ -177,11 +323,21 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/run_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:textColor="@color/text_primary"
+            android:textSize="24sp" />
+
+        <TextView
             android:id="@+id/round_label"
             style="@style/SectionLabel"
-            android:layout_marginTop="24dp"
-            android:textColor="@color/text_primary"
-            android:textSize="15sp" />
+            android:layout_marginTop="8dp"
+            android:textSize="14sp" />
 
         <FrameLayout
             android:layout_width="match_parent"

@@ -32,6 +32,7 @@ class TimerService : Service() {
     companion object {
         const val EXTRA_INTERVAL_MS = "interval_ms"
         const val EXTRA_ROUNDS = "rounds"
+        const val EXTRA_NAME = "name"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
 
@@ -47,6 +48,8 @@ class TimerService : Service() {
         @Volatile var roundMs = 3 * 60_000L
             private set
         @Volatile var rounds = 10
+            private set
+        @Volatile var name = ""
             private set
 
         val isRunning get() = startedAt != 0L
@@ -111,6 +114,7 @@ class TimerService : Service() {
         when (intent?.action) {
             ACTION_STOP -> shutdown(keepNotification = false)
             else -> if (!isRunning) begin(
+                intent?.getStringExtra(EXTRA_NAME) ?: "",
                 intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
                 intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds
             )
@@ -118,7 +122,8 @@ class TimerService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun begin(intervalMs: Long, count: Int) {
+    private fun begin(presetName: String, intervalMs: Long, count: Int) {
+        name = presetName
         roundMs = intervalMs.coerceAtLeast(5_000L)
         rounds = count.coerceIn(1, 99)
 
@@ -194,7 +199,7 @@ class TimerService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(getString(R.string.app_name))
+            .setContentTitle(name.ifBlank { getString(R.string.app_name) })
             .setContentText(text)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
