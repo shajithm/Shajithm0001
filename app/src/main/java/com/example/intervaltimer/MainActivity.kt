@@ -28,6 +28,7 @@ import android.widget.NumberPicker
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.media.RingtoneManager
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.TextStyle
@@ -39,9 +40,10 @@ class MainActivity : Activity() {
         private const val MAX_ROUNDS = 99
         private const val REQ_EXPORT = 10
         private const val REQ_IMPORT = 11
+        private const val REQ_SOUND = 12
     }
 
-    private enum class Screen { LIST, EDIT }
+    private enum class Screen { LIST, EDIT, SETTINGS }
 
     private lateinit var store: PresetStore
     private var screen = Screen.LIST
@@ -49,7 +51,8 @@ class MainActivity : Activity() {
     // Preset being edited (null id = new preset)
     private var editingId: Long? = null
     private var intervalMs = 0L
-    private var rounds = 10
+    private var rounds = 0
+    private var sound = ""
 
     // Schedule being edited
     private var schedOn = false
@@ -83,6 +86,14 @@ class MainActivity : Activity() {
     private lateinit var schedNext: TextView
     /** Weekday buttons as (bit index, view), in display order. */
     private val dayChips = mutableListOf<Pair<Int, TextView>>()
+
+    private lateinit var soundValue: TextView
+
+    // Settings screen
+    private lateinit var settingsView: View
+    private lateinit var setDefaultInterval: TextView
+    private lateinit var setDefaultRounds: TextView
+    private lateinit var setWeekStart: TextView
 
     // Run screen
     private lateinit var runView: View
@@ -155,6 +166,26 @@ class MainActivity : Activity() {
         schedDateRow.setOnClickListener { pickDate() }
         buildDayChips()
 
+        soundValue = findViewById(R.id.sound_value)
+        findViewById<View>(R.id.sound_row).setOnClickListener { pickSound() }
+
+        settingsView = findViewById(R.id.settings_screen)
+        setDefaultInterval = findViewById(R.id.set_default_interval)
+        setDefaultRounds = findViewById(R.id.set_default_rounds)
+        setWeekStart = findViewById(R.id.set_week_start)
+        findViewById<View>(R.id.settings_back).setOnClickListener { screen = Screen.LIST; render() }
+        findViewById<View>(R.id.set_default_interval_row).setOnClickListener {
+            pickDuration(AppSettings.defaultIntervalMs(this)) {
+                AppSettings.setDefaultIntervalMs(this, it); updateSettings()
+            }
+        }
+        findViewById<View>(R.id.set_default_rounds_row).setOnClickListener {
+            pickCount(AppSettings.defaultRounds(this)) {
+                AppSettings.setDefaultRounds(this, it); updateSettings()
+            }
+        }
+        findViewById<View>(R.id.set_week_start_row).setOnClickListener { pickWeekStart() }
+
         runView = findViewById(R.id.run_screen)
         runName = findViewById(R.id.run_name)
         ring = findViewById(R.id.ring)
@@ -199,6 +230,9 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (screen == Screen.EDIT && !TimerService.isRunning && !TimerService.finished) {
             closeEditor()
+        } else if (screen == Screen.SETTINGS && !TimerService.isRunning && !TimerService.finished) {
+            screen = Screen.LIST
+            render()
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
@@ -241,8 +275,10 @@ class MainActivity : Activity() {
 
     private fun openEditor(preset: Preset?) {
         editingId = preset?.id
-        intervalMs = preset?.intervalMs ?: 0L   // new timers start empty
-        rounds = preset?.rounds ?: 10
+        intervalMs = preset?.intervalMs ?: AppSettings.defaultIntervalMs(this)
+        rounds = preset?.rounds ?: AppSettings.defaultRounds(this)
+        sound = preset?.sound ?: ""
+        updateSound()
         schedOn = preset?.scheduleOn ?: false
         schedHour = preset?.hour ?: 7
         schedMinute = preset?.minute ?: 0
@@ -285,13 +321,24 @@ class MainActivity : Activity() {
         repeat = repeat,
         date = schedDate,
         days = schedDays,
+        sound = sound,
     )
 
     /** Saves the editor's values and returns the saved preset, or null if the schedule is invalid. */
     private fun saveEditor(): Preset? {
         val preset = editorPreset(editingId ?: store.newId())
-        if (preset.intervalMs < Durations.MIN_INTERVAL_MS) {
-            Toast.makeText(this, R.string.set_interval_first, Toast.LENGTH_LONG).show()
+        val missing = when {
+            preset.intervalMs < Durations.MIN_INTERVAL_MS && preset.rounds < 1 -> R.string.need_both
+            preset.intervalMs < Durations.MIN_INTERVAL_MS -> R.string.need_interval
+            preset.rounds < 1 -> R.string.need_rounds
+            else -> 0
+        }
+        if (missing != 0) {
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(R.string.need_title)
+                .setMessage(missing)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
             return null
         }
         if (preset.scheduleOn && Scheduler.nextMillis(preset) == null) {
@@ -352,7 +399,7 @@ class MainActivity : Activity() {
     }
 
     private fun changeRounds(direction: Int) {
-        rounds = (rounds + direction).coerceIn(1, MAX_ROUNDS)
+        rounds = (rounds + direction).coerceIn(0, MAX_ROUNDS)
         updateEditor()
     }
 
@@ -366,7 +413,12 @@ class MainActivity : Activity() {
 
     private fun pickInterval() {
         hideKeyboard()
-        val totalSec = intervalMs / 1000
+        pickDuration(intervalMs) { intervalMs = it; updateEditor() }
+    }
+
+    /** Days / hours / minutes / seconds picker. 0 is allowed (means "not set"). */
+    private fun pickDuration(current: Long, onPicked: (Long) -> Unit) {
+        val totalSec = current / 1000
         val two = NumberPicker.Formatter { "%02d".format(it) }
         val days = picker(0, Durations.MAX_DAYS, (totalSec / 86_400).toInt())
         val hours = picker(0, 23, ((totalSec % 86_400) / 3600).toInt()).apply { setFormatter(two) }
@@ -387,9 +439,8 @@ class MainActivity : Activity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val picked = days.value * Durations.DAY + hours.value * Durations.HOUR +
                     minutes.value * Durations.MINUTE + seconds.value * Durations.SECOND
-                intervalMs = if (picked == 0L) 0L
-                             else picked.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
-                updateEditor()
+                onPicked(if (picked == 0L) 0L
+                         else picked.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS))
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -397,7 +448,11 @@ class MainActivity : Activity() {
 
     private fun pickRounds() {
         hideKeyboard()
-        val count = picker(1, MAX_ROUNDS, rounds)
+        pickCount(rounds) { rounds = it; updateEditor() }
+    }
+
+    private fun pickCount(current: Int, onPicked: (Int) -> Unit) {
+        val count = picker(0, MAX_ROUNDS, current)
         val box = LinearLayout(this).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(16), 0, 0)
@@ -406,7 +461,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(R.string.rounds)
             .setView(box)
-            .setPositiveButton(android.R.string.ok) { _, _ -> rounds = count.value; updateEditor() }
+            .setPositiveButton(android.R.string.ok) { _, _ -> onPicked(count.value) }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
@@ -528,6 +583,7 @@ class MainActivity : Activity() {
             Intent(this, TimerService::class.java)
                 .setAction(TimerService.ACTION_START)
                 .putExtra(TimerService.EXTRA_NAME, p.name)
+                .putExtra(TimerService.EXTRA_SOUND, p.sound)
                 .putExtra(TimerService.EXTRA_INTERVAL_MS, p.intervalMs)
                 .putExtra(TimerService.EXTRA_ROUNDS, p.rounds)
         )
@@ -539,6 +595,7 @@ class MainActivity : Activity() {
         val showRun = running || finished
         runView.visibility = if (showRun) View.VISIBLE else View.GONE
         listView.visibility = if (!showRun && screen == Screen.LIST) View.VISIBLE else View.GONE
+        settingsView.visibility = if (!showRun && screen == Screen.SETTINGS) View.VISIBLE else View.GONE
         editView.visibility = if (!showRun && screen == Screen.EDIT) View.VISIBLE else View.GONE
 
         if (!showRun) {
@@ -577,16 +634,72 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- Alarm sound ----
+
+    private fun soundName(uri: String): String =
+        if (uri.isBlank()) getString(R.string.builtin_beep)
+        else runCatching { RingtoneManager.getRingtone(this, Uri.parse(uri))?.getTitle(this) }
+            .getOrNull() ?: getString(R.string.custom_sound)
+
+    private fun updateSound() {
+        soundValue.text = soundName(sound) + "  ›"
+    }
+
+    private fun pickSound() {
+        hideKeyboard()
+        val options = arrayOf(getString(R.string.builtin_beep), getString(R.string.choose_ringtone))
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.alarm_sound)
+            .setSingleChoiceItems(options, if (sound.isBlank()) 0 else 1) { d, which ->
+                d.dismiss()
+                if (which == 0) { sound = ""; updateSound() } else openRingtonePicker()
+            }
+            .show()
+    }
+
+    private fun openRingtonePicker() {
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE,
+                RingtoneManager.TYPE_ALARM or RingtoneManager.TYPE_RINGTONE or RingtoneManager.TYPE_NOTIFICATION)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, getString(R.string.alarm_sound))
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, false)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                if (sound.isBlank()) null else Uri.parse(sound))
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQ_SOUND)
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.no_ringtone_picker, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ---- Settings screen ----
+
+    private fun openSettings() {
+        updateSettings()
+        screen = Screen.SETTINGS
+        render()
+    }
+
+    private fun updateSettings() {
+        val ms = AppSettings.defaultIntervalMs(this)
+        setDefaultInterval.text = (if (ms == 0L) getString(R.string.not_set) else Durations.clock(ms)) + "  ›"
+        val n = AppSettings.defaultRounds(this)
+        setDefaultRounds.text = (if (n == 0) getString(R.string.not_set) else n.toString()) + "  ›"
+        setWeekStart.text = AppSettings.weekStart(this)
+            .getDisplayName(TextStyle.FULL, Locale.getDefault()) + "  ›"
+    }
+
     // ---- Export / import ----
 
     private fun showMenu(anchor: View) {
         android.widget.PopupMenu(this, anchor).apply {
             menu.add(0, 1, 0, R.string.export_timers)
             menu.add(0, 2, 1, R.string.import_timers)
-            menu.add(0, 3, 2, getString(R.string.week_start_menu,
-                AppSettings.weekStart(this@MainActivity).getDisplayName(TextStyle.FULL, Locale.getDefault())))
+            menu.add(0, 3, 2, R.string.settings)
             setOnMenuItemClickListener {
-                when (it.itemId) { 1 -> exportTimers(); 2 -> importTimers(); 3 -> pickWeekStart() }
+                when (it.itemId) { 1 -> exportTimers(); 2 -> importTimers(); 3 -> openSettings() }
                 true
             }
         }.show()
@@ -601,6 +714,7 @@ class MainActivity : Activity() {
                 AppSettings.setWeekStart(this, days[which])
                 buildDayChips()
                 buildList()
+                updateSettings()
                 d.dismiss()
             }
             .show()
@@ -636,6 +750,15 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_SOUND) {
+            if (resultCode == RESULT_OK) {
+                @Suppress("DEPRECATION")
+                val picked: Uri? = data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+                sound = picked?.toString() ?: ""
+                updateSound()
+            }
+            return
+        }
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         when (requestCode) {

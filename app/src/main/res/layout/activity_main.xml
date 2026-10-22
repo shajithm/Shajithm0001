@@ -296,6 +296,32 @@
                         android:textSize="22sp" />
                 </LinearLayout>
 
+                <!-- Alarm sound -->
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="24dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp">
+
+                    <LinearLayout
+                        android:id="@+id/sound_row"
+                        style="@style/SchedRow">
+
+                        <TextView
+                            style="@style/SchedRowLabel"
+                            android:text="@string/alarm_sound" />
+
+                        <TextView
+                            android:id="@+id/sound_value"
+                            style="@style/SchedRowValue"
+                            android:layout_width="0dp"
+                            android:layout_weight="1.4"
+                            android:ellipsize="end"
+                            android:gravity="end"
+                            android:maxLines="1" />
+                    </LinearLayout>
+                </LinearLayout>
+
                 <!-- Schedule (optional) -->
                 <LinearLayout
                     style="@style/Card"
@@ -460,6 +486,137 @@
                 android:textColor="#FFFFFF"
                 android:textSize="18sp" />
         </LinearLayout>
+    </LinearLayout>
+
+    <!-- ============ Settings ============ -->
+    <LinearLayout
+        android:id="@+id/settings_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/settings_back"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/back"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="←"
+                android:textColor="@color/text_primary"
+                android:textSize="24sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/settings"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="24dp">
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:text="@string/new_timer_defaults" />
+
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp">
+
+                    <LinearLayout
+                        android:id="@+id/set_default_interval_row"
+                        style="@style/SchedRow">
+
+                        <TextView
+                            style="@style/SchedRowLabel"
+                            android:text="@string/default_interval" />
+
+                        <TextView
+                            android:id="@+id/set_default_interval"
+                            style="@style/SchedRowValue" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/track" />
+
+                    <LinearLayout
+                        android:id="@+id/set_default_rounds_row"
+                        style="@style/SchedRow">
+
+                        <TextView
+                            style="@style/SchedRowLabel"
+                            android:text="@string/default_rounds" />
+
+                        <TextView
+                            android:id="@+id/set_default_rounds"
+                            style="@style/SchedRowValue" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/defaults_hint"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/calendar_label" />
+
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp">
+
+                    <LinearLayout
+                        android:id="@+id/set_week_start_row"
+                        style="@style/SchedRow">
+
+                        <TextView
+                            style="@style/SchedRowLabel"
+                            android:text="@string/week_start_title" />
+
+                        <TextView
+                            android:id="@+id/set_week_start"
+                            style="@style/SchedRowValue" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
     </LinearLayout>
 
     <!-- ============ Running / finished ============ -->

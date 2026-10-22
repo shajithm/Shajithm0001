@@ -7,6 +7,20 @@ import java.time.DayOfWeek
 object AppSettings {
 
     private const val KEY_WEEK_START = "week_start"
+    private const val KEY_DEFAULT_INTERVAL = "default_interval_ms"
+    private const val KEY_DEFAULT_ROUNDS = "default_rounds"
+
+    private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    /** Interval a new timer starts with (0 = must be set each time). */
+    fun defaultIntervalMs(context: Context): Long = prefs(context).getLong(KEY_DEFAULT_INTERVAL, 0L)
+    fun setDefaultIntervalMs(context: Context, ms: Long) =
+        prefs(context).edit().putLong(KEY_DEFAULT_INTERVAL, ms).apply()
+
+    /** Rounds a new timer starts with (0 = must be set each time). */
+    fun defaultRounds(context: Context): Int = prefs(context).getInt(KEY_DEFAULT_ROUNDS, 0)
+    fun setDefaultRounds(context: Context, n: Int) =
+        prefs(context).edit().putInt(KEY_DEFAULT_ROUNDS, n).apply()
 
     /** First day of the week used for weekday buttons, day lists and the date picker. Default Sunday. */
     fun weekStart(context: Context): DayOfWeek {

@@ -9,6 +9,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.net.Uri
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -35,12 +39,14 @@ class TimerService : Service() {
         const val EXTRA_ROUNDS = "rounds"
         const val EXTRA_NAME = "name"
         const val EXTRA_SCHEDULED = "scheduled"
+        const val EXTRA_SOUND = "sound"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
         const val ACTION_TICK = "com.example.intervaltimer.TICK"
         const val ACTION_RESTORE = "com.example.intervaltimer.RESTORE"
 
-        private const val MAX_ALARM_MS = 1500
+        private const val BEEP_MS = 1500L       // built-in beep length
+        private const val RINGTONE_MS = 3000L   // how long a chosen ringtone plays each round
         private const val LATE_LIMIT_MS = 60_000L   // don't sound a round alarm missed by more than this
         private const val CHANNEL_ID = "interval_timer"
         private const val NOTIFICATION_ID = 1
@@ -56,6 +62,8 @@ class TimerService : Service() {
         @Volatile var rounds = 10
             private set
         @Volatile var name = ""
+            private set
+        @Volatile var sound = ""
             private set
         @Volatile private var played = 0
         @Volatile var serviceAlive = false
@@ -86,6 +94,7 @@ class TimerService : Service() {
             val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             if (!p.getBoolean("active", false)) return
             name = p.getString("name", "") ?: ""
+            sound = p.getString("sound", "") ?: ""
             roundMs = p.getLong("roundMs", roundMs)
             rounds = p.getInt("rounds", rounds)
             played = p.getInt("played", 0)
@@ -128,6 +137,7 @@ class TimerService : Service() {
                 goForeground()
                 if (!isRunning) begin(
                     intent?.getStringExtra(EXTRA_NAME) ?: "",
+                    intent?.getStringExtra(EXTRA_SOUND) ?: "",
                     intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
                     intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds,
                     intent?.getBooleanExtra(EXTRA_SCHEDULED, false) ?: false
@@ -143,8 +153,9 @@ class TimerService : Service() {
         return START_STICKY
     }
 
-    private fun begin(presetName: String, intervalMs: Long, count: Int, scheduled: Boolean) {
+    private fun begin(presetName: String, soundUri: String, intervalMs: Long, count: Int, scheduled: Boolean) {
         name = presetName
+        sound = soundUri
         roundMs = intervalMs.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
         rounds = count.coerceIn(1, 99)
         played = 0
@@ -192,7 +203,7 @@ class TimerService : Service() {
         cancelBoundary()
         updateNotification(0L)
         // Let the final alarm finish sounding before shutting down.
-        handler.postDelayed({ shutdown(keepNotification = true) }, MAX_ALARM_MS + 500L)
+        handler.postDelayed({ shutdown(keepNotification = true) }, RINGTONE_MS + 500L)
     }
 
     private fun stopRun() {
@@ -238,16 +249,46 @@ class TimerService : Service() {
         return tone
     }
 
+    private var ringtone: Ringtone? = null
+    private var ringtoneUri = ""
+    private val stopRingtone = Runnable { ringtone?.stop() }
+
     private fun playAlarm() {
-        shortWake()
-        // Fire-and-forget: the tone plays on its own while the countdown continues.
-        val length = MAX_ALARM_MS.toLong().coerceAtMost(roundMs / 3).toInt()
-        tone()?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, length)
+        // Fire-and-forget: the sound plays on its own while the countdown continues.
+        val ring = customRingtone()
+        val length = (if (ring != null) RINGTONE_MS else BEEP_MS).coerceAtMost(roundMs / 3)
+        shortWake(length)
+        val played = ring != null && runCatching {
+            handler.removeCallbacks(stopRingtone)
+            ring.stop()
+            ring.play()
+            handler.postDelayed(stopRingtone, length)
+        }.isSuccess
+        if (!played) tone()?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, length.toInt())
         vibrator()?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
     }
 
+    /** The timer's chosen ringtone, or null for the built-in beep (or if it can't be loaded). */
+    private fun customRingtone(): Ringtone? {
+        if (sound.isBlank()) return null
+        if (ringtone == null || ringtoneUri != sound) {
+            ringtone?.stop()
+            ringtoneUri = sound
+            ringtone = runCatching {
+                RingtoneManager.getRingtone(this, Uri.parse(sound))?.apply {
+                    audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    if (Build.VERSION.SDK_INT >= 28) isLooping = true   // fill the few seconds, then stop
+                }
+            }.getOrNull()
+        }
+        return ringtone
+    }
+
     /** Keeps the CPU awake just long enough for the alarm to sound. */
-    private fun shortWake() = wakeLock("IntervalTimer::alarm").acquire(MAX_ALARM_MS + 2_000L)
+    private fun shortWake(length: Long = BEEP_MS) = wakeLock("IntervalTimer::alarm").acquire(length + 2_000L)
 
     private fun wakeLock(tag: String) =
         (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag)
@@ -266,6 +307,7 @@ class TimerService : Service() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
             .putBoolean("active", true)
             .putString("name", name)
+            .putString("sound", sound)
             .putLong("roundMs", roundMs)
             .putInt("rounds", rounds)
             .putLong("start", startedAt)
@@ -281,6 +323,8 @@ class TimerService : Service() {
 
     private fun shutdown(keepNotification: Boolean) {
         handler.removeCallbacksAndMessages(null)
+        ringtone?.stop()
+        ringtone = null
         tone?.release()
         tone = null
         longWakeLock?.takeIf { it.isHeld }?.release()
@@ -292,6 +336,7 @@ class TimerService : Service() {
     override fun onDestroy() {
         serviceAlive = false
         handler.removeCallbacksAndMessages(null)
+        ringtone?.stop()
         tone?.release()
         longWakeLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()

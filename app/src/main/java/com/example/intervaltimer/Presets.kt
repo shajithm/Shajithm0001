@@ -22,6 +22,8 @@ data class Preset(
     val date: LocalDate = LocalDate.now(),
     /** Chosen weekdays for DAYS: bit 0 = Monday … bit 6 = Sunday. */
     val days: Int = WEEKDAYS,
+    /** Alarm sound: a ringtone URI from the phone, or "" for the built-in beep. */
+    val sound: String = "",
 ) {
     val totalMs get() = intervalMs * rounds
 
@@ -96,6 +98,7 @@ class PresetStore(context: Context) {
             .put("repeat", p.repeat.name)
             .put("date", p.date.toString())
             .put("days", p.days)
+            .put("sound", p.sound)
 
         /** Reads one timer, clamping values so a hand-edited file can't break the app. */
         fun fromJson(o: JSONObject) = Preset(
@@ -109,6 +112,7 @@ class PresetStore(context: Context) {
             repeat = runCatching { Repeat.valueOf(o.optString("repeat")) }.getOrDefault(Repeat.DAILY),
             date = runCatching { LocalDate.parse(o.optString("date")) }.getOrDefault(LocalDate.now()),
             days = o.optInt("days", Preset.WEEKDAYS) and Preset.ALL_DAYS,
+            sound = o.optString("sound", ""),
         )
 
         /** The file written by Export. */
