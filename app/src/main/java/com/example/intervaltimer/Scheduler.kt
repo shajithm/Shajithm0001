@@ -146,7 +146,7 @@ object Scheduler {
         Preset.ALL_DAYS -> context.getString(R.string.repeat_daily)
         Preset.WEEKDAYS -> context.getString(R.string.weekdays)
         0b1100000 -> context.getString(R.string.weekends)
-        else -> DayOfWeek.values().filter { hasDay(mask, it) }
+        else -> AppSettings.orderedDays(AppSettings.weekStart(context)).filter { hasDay(mask, it) }
             .joinToString(", ") { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }
     }
 

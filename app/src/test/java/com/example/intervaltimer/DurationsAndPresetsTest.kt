@@ -109,3 +109,23 @@ class PresetsJsonTest {
         assertTrue(merged.any { it.name == b.name })
     }
 }
+
+class WeekStartTest {
+    @Test fun sundayFirst() = assertEquals(
+        listOf(java.time.DayOfWeek.SUNDAY, java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY,
+            java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.FRIDAY,
+            java.time.DayOfWeek.SATURDAY),
+        AppSettings.orderedDays(java.time.DayOfWeek.SUNDAY))
+
+    @Test fun saturdayFirst() {
+        val d = AppSettings.orderedDays(java.time.DayOfWeek.SATURDAY)
+        assertEquals(java.time.DayOfWeek.SATURDAY, d.first())
+        assertEquals(java.time.DayOfWeek.FRIDAY, d.last())
+    }
+
+    @Test fun calendarConstants() {
+        assertEquals(java.util.Calendar.SUNDAY, AppSettings.calendarDay(java.time.DayOfWeek.SUNDAY))
+        assertEquals(java.util.Calendar.MONDAY, AppSettings.calendarDay(java.time.DayOfWeek.MONDAY))
+        assertEquals(java.util.Calendar.SATURDAY, AppSettings.calendarDay(java.time.DayOfWeek.SATURDAY))
+    }
+}

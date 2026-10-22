@@ -48,7 +48,7 @@ class MainActivity : Activity() {
 
     // Preset being edited (null id = new preset)
     private var editingId: Long? = null
-    private var intervalMs = 3 * 60_000L
+    private var intervalMs = 0L
     private var rounds = 10
 
     // Schedule being edited
@@ -81,7 +81,8 @@ class MainActivity : Activity() {
     private lateinit var schedDateValue: TextView
     private lateinit var schedDaysRow: LinearLayout
     private lateinit var schedNext: TextView
-    private val dayChips = mutableListOf<TextView>()
+    /** Weekday buttons as (bit index, view), in display order. */
+    private val dayChips = mutableListOf<Pair<Int, TextView>>()
 
     // Run screen
     private lateinit var runView: View
@@ -240,7 +241,7 @@ class MainActivity : Activity() {
 
     private fun openEditor(preset: Preset?) {
         editingId = preset?.id
-        intervalMs = preset?.intervalMs ?: 3 * 60_000L
+        intervalMs = preset?.intervalMs ?: 0L   // new timers start empty
         rounds = preset?.rounds ?: 10
         schedOn = preset?.scheduleOn ?: false
         schedHour = preset?.hour ?: 7
@@ -289,6 +290,10 @@ class MainActivity : Activity() {
     /** Saves the editor's values and returns the saved preset, or null if the schedule is invalid. */
     private fun saveEditor(): Preset? {
         val preset = editorPreset(editingId ?: store.newId())
+        if (preset.intervalMs < Durations.MIN_INTERVAL_MS) {
+            Toast.makeText(this, R.string.set_interval_first, Toast.LENGTH_LONG).show()
+            return null
+        }
         if (preset.scheduleOn && Scheduler.nextMillis(preset) == null) {
             val msg = if (preset.repeat == Repeat.DAYS && preset.days == 0) R.string.pick_a_day
                       else R.string.time_passed
@@ -380,9 +385,10 @@ class MainActivity : Activity() {
             .setTitle(R.string.interval)
             .setView(row)
             .setPositiveButton(android.R.string.ok) { _, _ ->
-                intervalMs = (days.value * Durations.DAY + hours.value * Durations.HOUR +
-                    minutes.value * Durations.MINUTE + seconds.value * Durations.SECOND)
-                    .coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
+                val picked = days.value * Durations.DAY + hours.value * Durations.HOUR +
+                    minutes.value * Durations.MINUTE + seconds.value * Durations.SECOND
+                intervalMs = if (picked == 0L) 0L
+                             else picked.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
                 updateEditor()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -421,8 +427,11 @@ class MainActivity : Activity() {
     // ---- Schedule controls ----
 
     private fun buildDayChips() {
+        schedDaysRow.removeAllViews()
+        dayChips.clear()
         val size = dp(40)
-        DayOfWeek.values().forEachIndexed { i, day ->
+        AppSettings.orderedDays(AppSettings.weekStart(this)).forEach { day ->
+            val i = day.value - 1   // bit index: Monday = 0 … Sunday = 6
             val chip = TextView(this).apply {
                 text = day.getDisplayName(TextStyle.NARROW, Locale.getDefault())
                 gravity = Gravity.CENTER
@@ -439,7 +448,7 @@ class MainActivity : Activity() {
                 addView(chip, android.widget.FrameLayout.LayoutParams(size, size, Gravity.CENTER))
             }
             schedDaysRow.addView(cell, LinearLayout.LayoutParams(0, size, 1f))
-            dayChips.add(chip)
+            dayChips.add(i to chip)
         }
     }
 
@@ -457,7 +466,7 @@ class MainActivity : Activity() {
         schedDateValue.text = Scheduler.dateText(schedDate) + "  ›"
 
         schedDaysRow.visibility = if (repeat == Repeat.DAYS) View.VISIBLE else View.GONE
-        dayChips.forEachIndexed { i, chip ->
+        dayChips.forEach { (i, chip) ->
             val on = schedDays and (1 shl i) != 0
             chip.isSelected = on
             chip.setTextColor(getColor(if (on) android.R.color.white else R.color.text_secondary))
@@ -486,6 +495,7 @@ class MainActivity : Activity() {
             schedDate = LocalDate.of(y, m + 1, d); updateSchedule()
         }, schedDate.year, schedDate.monthValue - 1, schedDate.dayOfMonth).apply {
             datePicker.minDate = System.currentTimeMillis() - 1000
+            datePicker.firstDayOfWeek = AppSettings.calendarDay(AppSettings.weekStart(this@MainActivity))
         }.show()
     }
 
@@ -573,11 +583,27 @@ class MainActivity : Activity() {
         android.widget.PopupMenu(this, anchor).apply {
             menu.add(0, 1, 0, R.string.export_timers)
             menu.add(0, 2, 1, R.string.import_timers)
+            menu.add(0, 3, 2, getString(R.string.week_start_menu,
+                AppSettings.weekStart(this@MainActivity).getDisplayName(TextStyle.FULL, Locale.getDefault())))
             setOnMenuItemClickListener {
-                when (it.itemId) { 1 -> exportTimers(); 2 -> importTimers() }
+                when (it.itemId) { 1 -> exportTimers(); 2 -> importTimers(); 3 -> pickWeekStart() }
                 true
             }
         }.show()
+    }
+
+    private fun pickWeekStart() {
+        val days = AppSettings.orderedDays(DayOfWeek.SUNDAY)
+        val labels = days.map { it.getDisplayName(TextStyle.FULL, Locale.getDefault()) }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.week_start_title)
+            .setSingleChoiceItems(labels, days.indexOf(AppSettings.weekStart(this))) { d, which ->
+                AppSettings.setWeekStart(this, days[which])
+                buildDayChips()
+                buildList()
+                d.dismiss()
+            }
+            .show()
     }
 
     private fun exportTimers() {

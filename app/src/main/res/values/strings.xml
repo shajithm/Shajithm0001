@@ -83,6 +83,9 @@
     <string name="import_message">Add them to your current timers, or replace your current timers with them?</string>
     <string name="import_add">Add</string>
     <string name="import_replace">Replace all</string>
+    <string name="week_start_menu">First day of week: %1$s</string>
+    <string name="week_start_title">First day of week</string>
+    <string name="set_interval_first">Set the interval first (at least 5 seconds)</string>
     <plurals name="exported">
         <item quantity="one">Exported %d timer</item>
         <item quantity="other">Exported %d timers</item>
