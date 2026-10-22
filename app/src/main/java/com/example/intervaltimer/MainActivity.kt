@@ -17,10 +17,21 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.provider.Settings
+import android.net.Uri
+import android.text.format.DateFormat
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.NumberPicker
+import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 
 class MainActivity : Activity() {
 
@@ -41,6 +52,14 @@ class MainActivity : Activity() {
     private var intervalMs = 3 * 60_000L
     private var rounds = 10
 
+    // Schedule being edited
+    private var schedOn = false
+    private var schedHour = 7
+    private var schedMinute = 0
+    private var repeat = Repeat.DAILY
+    private var schedDate: LocalDate = LocalDate.now()
+    private var schedDays = Preset.WEEKDAYS
+
     // List screen
     private lateinit var listView: View
     private lateinit var presetContainer: LinearLayout
@@ -54,6 +73,16 @@ class MainActivity : Activity() {
     private lateinit var roundsValue: TextView
     private lateinit var totalValue: TextView
     private lateinit var deleteButton: View
+    private lateinit var scheduleSwitch: Switch
+    private lateinit var scheduleOptions: View
+    private lateinit var schedTime: TextView
+    private lateinit var schedRepeat: TextView
+    private lateinit var schedDateRow: View
+    private lateinit var schedDateLabel: TextView
+    private lateinit var schedDateValue: TextView
+    private lateinit var schedDaysRow: LinearLayout
+    private lateinit var schedNext: TextView
+    private val dayChips = mutableListOf<TextView>()
 
     // Run screen
     private lateinit var runView: View
@@ -99,8 +128,28 @@ class MainActivity : Activity() {
         intervalValue.setOnClickListener { pickInterval() }
         roundsValue.setOnClickListener { pickRounds() }
         findViewById<View>(R.id.save_button).setOnClickListener { saveEditor() }
-        findViewById<View>(R.id.start_now_button).setOnClickListener { startTimer(saveEditor()) }
+        findViewById<View>(R.id.start_now_button).setOnClickListener { saveEditor()?.let { startTimer(it) } }
         deleteButton.setOnClickListener { confirmDelete() }
+
+        scheduleSwitch = findViewById(R.id.schedule_switch)
+        scheduleOptions = findViewById(R.id.schedule_options)
+        schedTime = findViewById(R.id.sched_time)
+        schedRepeat = findViewById(R.id.sched_repeat)
+        schedDateRow = findViewById(R.id.sched_date_row)
+        schedDateLabel = findViewById(R.id.sched_date_label)
+        schedDateValue = findViewById(R.id.sched_date)
+        schedDaysRow = findViewById(R.id.sched_days)
+        schedNext = findViewById(R.id.sched_next)
+        findViewById<View>(R.id.schedule_header).setOnClickListener { scheduleSwitch.toggle() }
+        scheduleSwitch.setOnCheckedChangeListener { _, on ->
+            hideKeyboard()
+            schedOn = on
+            updateSchedule()
+        }
+        findViewById<View>(R.id.sched_time_row).setOnClickListener { pickTime() }
+        findViewById<View>(R.id.sched_repeat_row).setOnClickListener { pickRepeat() }
+        schedDateRow.setOnClickListener { pickDate() }
+        buildDayChips()
 
         runView = findViewById(R.id.run_screen)
         runName = findViewById(R.id.run_name)
@@ -119,6 +168,7 @@ class MainActivity : Activity() {
             }
         }
 
+        Scheduler.scheduleAll(this)
         buildList()
 
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -162,6 +212,15 @@ class MainActivity : Activity() {
                 R.string.preset_detail,
                 TimerService.format(p.intervalMs), p.rounds, TimerService.format(p.totalMs)
             )
+            val sched = item.findViewById<TextView>(R.id.preset_schedule)
+            if (p.scheduleOn) {
+                val next = Scheduler.nextText(this, p)
+                sched.text = "⏰  " + Scheduler.describe(this, p) +
+                    (if (next != null && p.repeat != Repeat.ONCE) "\n" + next else "")
+                sched.visibility = View.VISIBLE
+            } else {
+                sched.visibility = View.GONE
+            }
             item.setOnClickListener { openEditor(p) }
             item.findViewById<View>(R.id.preset_play).setOnClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -177,6 +236,14 @@ class MainActivity : Activity() {
         editingId = preset?.id
         intervalMs = preset?.intervalMs ?: 3 * 60_000L
         rounds = preset?.rounds ?: 10
+        schedOn = preset?.scheduleOn ?: false
+        schedHour = preset?.hour ?: 7
+        schedMinute = preset?.minute ?: 0
+        repeat = preset?.repeat ?: Repeat.DAILY
+        schedDate = preset?.date?.takeIf { it >= LocalDate.now() } ?: LocalDate.now()
+        schedDays = preset?.days ?: Preset.WEEKDAYS
+        scheduleSwitch.isChecked = schedOn
+        updateSchedule()
         nameInput.setText(preset?.name ?: "")
         nameInput.setSelection(nameInput.text.length)
         editTitle.text = getString(if (preset == null) R.string.new_timer else R.string.edit_timer)
@@ -200,14 +267,52 @@ class MainActivity : Activity() {
         render()
     }
 
-    /** Saves the editor's values and returns the saved preset. */
-    private fun saveEditor(): Preset {
-        val name = nameInput.text.toString().trim().ifEmpty { defaultName() }
-        val preset = Preset(editingId ?: store.newId(), name, intervalMs, rounds)
+    private fun editorPreset(id: Long) = Preset(
+        id = id,
+        name = nameInput.text.toString().trim().ifEmpty { defaultName() },
+        intervalMs = intervalMs,
+        rounds = rounds,
+        scheduleOn = schedOn,
+        hour = schedHour,
+        minute = schedMinute,
+        repeat = repeat,
+        date = schedDate,
+        days = schedDays,
+    )
+
+    /** Saves the editor's values and returns the saved preset, or null if the schedule is invalid. */
+    private fun saveEditor(): Preset? {
+        val preset = editorPreset(editingId ?: store.newId())
+        if (preset.scheduleOn && Scheduler.nextMillis(preset) == null) {
+            val msg = if (preset.repeat == Repeat.DAYS && preset.days == 0) R.string.pick_a_day
+                      else R.string.time_passed
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            return null
+        }
         store.save(preset)
+        Scheduler.schedule(this, preset)
         editingId = preset.id
         closeEditor()
+        if (preset.scheduleOn) {
+            Scheduler.nextText(this, preset)?.let {
+                Toast.makeText(this, getString(R.string.scheduled_toast, preset.name, it), Toast.LENGTH_LONG).show()
+            }
+            if (!Scheduler.canScheduleExact(this)) askExactAlarmPermission()
+        }
         return preset
+    }
+
+    private fun askExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT < 31) return
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.exact_title)
+            .setMessage(R.string.exact_message)
+            .setPositiveButton(R.string.open_settings) { _, _ ->
+                startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:$packageName")))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun defaultName(): String {
@@ -223,7 +328,9 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(getString(R.string.delete_title, name))
             .setMessage(R.string.delete_message)
-            .setPositiveButton(R.string.delete) { _, _ -> store.delete(id); closeEditor() }
+            .setPositiveButton(R.string.delete) { _, _ ->
+                Scheduler.cancel(this, id); store.delete(id); closeEditor()
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
@@ -299,6 +406,98 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER_HORIZONTAL
         addView(picker)
         addView(TextView(context).apply { text = label; gravity = Gravity.CENTER })
+    }
+
+    // ---- Schedule controls ----
+
+    private fun buildDayChips() {
+        val size = dp(40)
+        DayOfWeek.values().forEachIndexed { i, day ->
+            val chip = TextView(this).apply {
+                text = day.getDisplayName(TextStyle.NARROW, Locale.getDefault())
+                gravity = Gravity.CENTER
+                textSize = 15f
+                setBackgroundResource(R.drawable.bg_day)
+                contentDescription = day.getDisplayName(TextStyle.FULL, Locale.getDefault())
+                setOnClickListener {
+                    it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    schedDays = schedDays xor (1 shl i)
+                    updateSchedule()
+                }
+            }
+            val cell = android.widget.FrameLayout(this).apply {
+                addView(chip, android.widget.FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+            }
+            schedDaysRow.addView(cell, LinearLayout.LayoutParams(0, size, 1f))
+            dayChips.add(chip)
+        }
+    }
+
+    private fun updateSchedule() {
+        scheduleOptions.visibility = if (schedOn) View.VISIBLE else View.GONE
+        if (!schedOn) return
+
+        schedTime.text = Scheduler.timeText(this, schedHour, schedMinute)
+        schedRepeat.text = Scheduler.repeatText(this, repeat) + "  ›"
+
+        schedDateRow.visibility =
+            if (repeat == Repeat.ONCE || repeat == Repeat.WEEKLY || repeat == Repeat.MONTHLY) View.VISIBLE
+            else View.GONE
+        schedDateLabel.text = getString(if (repeat == Repeat.ONCE) R.string.date else R.string.starting)
+        schedDateValue.text = Scheduler.dateText(schedDate) + "  ›"
+
+        schedDaysRow.visibility = if (repeat == Repeat.DAYS) View.VISIBLE else View.GONE
+        dayChips.forEachIndexed { i, chip ->
+            val on = schedDays and (1 shl i) != 0
+            chip.isSelected = on
+            chip.setTextColor(getColor(if (on) android.R.color.white else R.color.text_secondary))
+        }
+
+        val preview = editorPreset(editingId ?: 0L).copy(scheduleOn = true)
+        val next = Scheduler.nextText(this, preview)
+        schedNext.text = when {
+            next == null && repeat == Repeat.DAYS && schedDays == 0 -> getString(R.string.pick_a_day)
+            next == null -> getString(R.string.time_passed)
+            repeat == Repeat.ONCE -> getString(R.string.starts_once, next)
+            else -> Scheduler.describe(this, preview) + "\n" + next
+        }
+    }
+
+    private fun pickTime() {
+        hideKeyboard()
+        TimePickerDialog(this, { _, h, m ->
+            schedHour = h; schedMinute = m; updateSchedule()
+        }, schedHour, schedMinute, DateFormat.is24HourFormat(this)).show()
+    }
+
+    private fun pickDate() {
+        hideKeyboard()
+        DatePickerDialog(this, { _, y, m, d ->
+            schedDate = LocalDate.of(y, m + 1, d); updateSchedule()
+        }, schedDate.year, schedDate.monthValue - 1, schedDate.dayOfMonth).apply {
+            datePicker.minDate = System.currentTimeMillis() - 1000
+        }.show()
+    }
+
+    private fun pickRepeat() {
+        hideKeyboard()
+        val options = Repeat.values()
+        val labels = options.map { r ->
+            when (r) {
+                Repeat.WEEKLY -> getString(R.string.repeat_weekly_on,
+                    schedDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault()))
+                Repeat.MONTHLY -> getString(R.string.repeat_monthly_on, Scheduler.ordinal(schedDate.dayOfMonth))
+                else -> Scheduler.repeatText(this, r)
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.repeat)
+            .setSingleChoiceItems(labels, options.indexOf(repeat)) { d, which ->
+                repeat = options[which]
+                updateSchedule()
+                d.dismiss()
+            }
+            .show()
     }
 
     // ---- Starting and the run screen ----

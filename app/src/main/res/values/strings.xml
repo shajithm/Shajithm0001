@@ -38,4 +38,35 @@
     <string name="rounds_done">All %1$d rounds finished</string>
     <string name="done_notification">All %1$d rounds complete</string>
     <string name="notification_progress">Round %1$d of %2$d · %3$s left</string>
+
+    <string name="schedule_label">START AT A SET TIME</string>
+    <string name="schedule_hint">Optional · starts automatically, even if the app is closed</string>
+    <string name="start_time">Start time</string>
+    <string name="repeat">Repeat</string>
+    <string name="date">Date</string>
+    <string name="starting">Starting</string>
+    <string name="repeat_once">Once</string>
+    <string name="repeat_daily">Every day</string>
+    <string name="repeat_weekly">Every week</string>
+    <string name="repeat_monthly">Every month</string>
+    <string name="repeat_days">Specific weekdays</string>
+    <string name="repeat_weekly_on">Every week (on %1$s)</string>
+    <string name="repeat_monthly_on">Every month (on the %1$s)</string>
+    <string name="weekdays">Weekdays</string>
+    <string name="weekends">Weekends</string>
+    <string name="desc_once">Once · %1$s at %2$s</string>
+    <string name="desc_daily">Every day at %1$s</string>
+    <string name="desc_weekly">Every %1$s at %2$s</string>
+    <string name="desc_monthly">Monthly on the %1$s at %2$s</string>
+    <string name="desc_days">%1$s at %2$s</string>
+    <string name="today">Today</string>
+    <string name="tomorrow">Tomorrow</string>
+    <string name="next_at">Next start: %1$s at %2$s</string>
+    <string name="starts_once">%1$s</string>
+    <string name="pick_a_day">Pick at least one day</string>
+    <string name="time_passed">That date and time has already passed</string>
+    <string name="scheduled_toast">“%1$s” is scheduled. %2$s</string>
+    <string name="exact_title">Allow exact alarms</string>
+    <string name="exact_message">To start your timer exactly on time, allow “Alarms &amp; reminders” for Interval Timer.</string>
+    <string name="open_settings">Open settings</string>
 </resources>

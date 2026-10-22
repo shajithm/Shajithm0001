@@ -33,6 +33,7 @@ class TimerService : Service() {
         const val EXTRA_INTERVAL_MS = "interval_ms"
         const val EXTRA_ROUNDS = "rounds"
         const val EXTRA_NAME = "name"
+        const val EXTRA_SCHEDULED = "scheduled"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
 
@@ -116,13 +117,14 @@ class TimerService : Service() {
             else -> if (!isRunning) begin(
                 intent?.getStringExtra(EXTRA_NAME) ?: "",
                 intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
-                intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds
+                intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds,
+                intent?.getBooleanExtra(EXTRA_SCHEDULED, false) ?: false
             )
         }
         return START_NOT_STICKY
     }
 
-    private fun begin(presetName: String, intervalMs: Long, count: Int) {
+    private fun begin(presetName: String, intervalMs: Long, count: Int, scheduled: Boolean) {
         name = presetName
         roundMs = intervalMs.coerceAtLeast(5_000L)
         rounds = count.coerceIn(1, 99)
@@ -145,6 +147,8 @@ class TimerService : Service() {
         alarmsPlayed = 0
         finished = false
         startedAt = SystemClock.elapsedRealtime()
+        // A scheduled timer starts by itself, so give a short signal that it has begun.
+        if (scheduled) tone?.startTone(ToneGenerator.TONE_PROP_BEEP2, 400)
         handler.post(tick)
     }
 
