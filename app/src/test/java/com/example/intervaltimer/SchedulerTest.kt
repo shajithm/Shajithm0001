@@ -83,3 +83,14 @@ class SchedulerTest {
         assertEquals("22nd", Scheduler.ordinal(22)); assertEquals("31st", Scheduler.ordinal(31))
     }
 }
+
+class MissedStartTest {
+    private val now = 1_800_000_000_000L
+
+    @Test fun recentMissRuns() = org.junit.Assert.assertTrue(Scheduler.isMissedButRecent(now - 60_000L, now))
+    @Test fun exactlyNowRuns() = org.junit.Assert.assertTrue(Scheduler.isMissedButRecent(now, now))
+    @Test fun atGraceLimitRuns() = org.junit.Assert.assertTrue(Scheduler.isMissedButRecent(now - Scheduler.GRACE_MS, now))
+    @Test fun tooOldIsSkipped() = org.junit.Assert.assertFalse(Scheduler.isMissedButRecent(now - Scheduler.GRACE_MS - 1, now))
+    @Test fun futureIsNotMissed() = org.junit.Assert.assertFalse(Scheduler.isMissedButRecent(now + 1_000L, now))
+    @Test fun notArmedIsIgnored() = org.junit.Assert.assertFalse(Scheduler.isMissedButRecent(0L, now))
+}

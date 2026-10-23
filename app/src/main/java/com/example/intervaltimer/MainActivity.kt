@@ -94,6 +94,8 @@ class MainActivity : Activity() {
     private lateinit var setDefaultInterval: TextView
     private lateinit var setDefaultRounds: TextView
     private lateinit var setWeekStart: TextView
+    private lateinit var checklist: LinearLayout
+    private lateinit var checklistHint: TextView
     // "While running" options of the timer being edited
     private var floating = false
     private var voice = VoiceChoice.OFF
@@ -193,6 +195,8 @@ class MainActivity : Activity() {
             }
         }
         findViewById<View>(R.id.set_week_start_row).setOnClickListener { pickWeekStart() }
+        checklist = findViewById(R.id.checklist)
+        checklistHint = findViewById(R.id.checklist_hint)
 
         editFloatingSwitch = findViewById(R.id.edit_floating_switch)
         editFloatingHint = findViewById(R.id.edit_floating_hint)
@@ -228,8 +232,8 @@ class MainActivity : Activity() {
             }
         }
 
-        Scheduler.scheduleAll(this)
         buildList()
+        handleStartIntent(intent)
 
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -245,7 +249,26 @@ class MainActivity : Activity() {
         // Pick up a run that continued while the app was closed.
         TimerService.load(this)
         if (TimerService.isRunning && !TimerService.serviceAlive) TimerService.resume(this)
+        // Re-arm schedules, and run one that was missed in the last few minutes.
+        Scheduler.scheduleAll(this)
+        if (screen == Screen.LIST) buildList()
         handler.post(refresh)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleStartIntent(intent)
+    }
+
+    /** Opened from a "scheduled timer" alert: start that timer right away. */
+    private fun handleStartIntent(intent: Intent?) {
+        val id = intent?.getLongExtra(Scheduler.EXTRA_START_ID, -1L) ?: -1L
+        if (id < 0) return
+        intent?.removeExtra(Scheduler.EXTRA_START_ID)
+        if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
+        getSystemService(android.app.NotificationManager::class.java).cancel(Scheduler.startNotificationId(id))
+        TimerService.load(this)
+        if (!TimerService.isRunning) store.get(id)?.let { startTimer(it, scheduled = true) }
     }
 
     override fun onStart() {
@@ -404,9 +427,21 @@ class MainActivity : Activity() {
             Scheduler.nextText(this, preset)?.let {
                 Toast.makeText(this, getString(R.string.scheduled_toast, preset.name, it), Toast.LENGTH_LONG).show()
             }
-            if (!Scheduler.canScheduleExact(this)) askExactAlarmPermission()
+            if (!scheduleReady() || isXiaomi) offerScheduleSetup()
         }
         return preset
+    }
+
+    private fun offerScheduleSetup() {
+        if (isXiaomi && scheduleReady() && getSharedPreferences("settings", MODE_PRIVATE)
+                .getBoolean("xiaomi_setup_shown", false)) return
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xiaomi_setup_shown", true).apply()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.schedule_setup_title)
+            .setMessage(R.string.schedule_setup_message)
+            .setPositiveButton(R.string.review) { _, _ -> openSettings() }
+            .setNegativeButton(R.string.later, null)
+            .show()
     }
 
     private fun askExactAlarmPermission() {
@@ -626,9 +661,9 @@ class MainActivity : Activity() {
 
     // ---- Starting and the run screen ----
 
-    private fun startTimer(p: Preset) {
+    private fun startTimer(p: Preset, scheduled: Boolean = false) {
         hideKeyboard()
-        startForegroundService(TimerService.startIntent(this, p))
+        startForegroundService(TimerService.startIntent(this, p, scheduled))
     }
 
     private fun render() {
@@ -731,6 +766,90 @@ class MainActivity : Activity() {
         setDefaultRounds.text = (if (n == 0) getString(R.string.not_set) else n.toString()) + "  ›"
         setWeekStart.text = AppSettings.weekStart(this)
             .getDisplayName(TextStyle.FULL, Locale.getDefault()) + "  ›"
+        buildChecklist()
+    }
+
+    // ---- Scheduled-start checklist ----
+
+    private val isXiaomi = Build.MANUFACTURER.lowercase(Locale.ROOT).let {
+        "xiaomi" in it || "redmi" in it || "poco" in it
+    }
+
+    private fun notificationsOk() =
+        getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled()
+
+    private fun batteryOk() =
+        getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+
+    private fun fullScreenOk() = Build.VERSION.SDK_INT < 34 ||
+        getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent()
+
+    /** True when everything Android itself reports is allowed. */
+    private fun scheduleReady() =
+        Scheduler.canScheduleExact(this) && notificationsOk() && batteryOk() && fullScreenOk()
+
+    private fun buildChecklist() {
+        checklist.removeAllViews()
+        val pkg = Uri.parse("package:$packageName")
+        fun open(action: String, data: Uri? = pkg) = runCatching {
+            startActivity(Intent(action).apply { if (data != null) setData(data) })
+        }.isSuccess
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            checkRow(R.string.check_exact, Scheduler.canScheduleExact(this)) {
+                open(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+            }
+        }
+        checkRow(R.string.check_notifications, notificationsOk()) {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            }
+        }
+        checkRow(R.string.check_battery, batteryOk()) {
+            if (!open(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)) {
+                open(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS, null)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            checkRow(R.string.check_fullscreen, fullScreenOk()) {
+                open(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+            }
+        }
+        if (isXiaomi) {
+            checkRow(R.string.check_autostart, null) {
+                val ok = runCatching {
+                    startActivity(Intent().setComponent(android.content.ComponentName(
+                        "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
+                }.isSuccess
+                if (!ok) open(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            }
+            checkRow(R.string.check_app_settings, null) { open(Settings.ACTION_APPLICATION_DETAILS_SETTINGS) }
+        }
+        checklistHint.text = getString(if (isXiaomi) R.string.checklist_hint_xiaomi else R.string.checklist_hint)
+    }
+
+    /** One checklist row. [ok]: true = allowed, false = needs fixing, null = can't be checked (just open). */
+    private fun checkRow(label: Int, ok: Boolean?, action: () -> Unit) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            setBackgroundResource(android.R.drawable.list_selector_background)
+            isClickable = true
+            setOnClickListener { action() }
+        }
+        row.addView(TextView(this).apply {
+            text = getString(label)
+            textSize = 16f
+            setTextColor(getColor(R.color.text_secondary))
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(TextView(this).apply {
+            text = getString(when (ok) { true -> R.string.check_ok; false -> R.string.check_fix; null -> R.string.check_open })
+            textSize = 15f
+            setTextColor(getColor(when (ok) { true -> R.color.success; false -> R.color.accent; null -> R.color.text_primary }))
+        })
+        checklist.addView(row)
     }
 
     // ---- "While running" options (per timer) ----

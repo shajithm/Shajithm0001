@@ -1,6 +1,9 @@
 package com.example.intervaltimer
 
 import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -24,6 +27,16 @@ object Scheduler {
 
     private const val EXTRA_ID = "preset_id"
     private const val EXTRA_AT = "trigger_at"
+    const val EXTRA_START_ID = "start_preset_id"
+    private const val STATE = "schedule_state"
+    private const val START_CHANNEL = "scheduled_start"
+
+    /** A start that was missed (phone asleep, app blocked, restarted…) is still run if found within this window. */
+    const val GRACE_MS = 15 * 60_000L
+
+    /** True if a start armed for [armedAt] was missed but is recent enough to run now. */
+    fun isMissedButRecent(armedAt: Long, now: Long): Boolean =
+        armedAt in 1..now && now - armedAt <= GRACE_MS
 
     // ---------- When is the next start? ----------
 
@@ -88,21 +101,100 @@ object Scheduler {
         } else {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context, p.id, at))
         }
+        setArmed(context, p.id, at)
         return at
     }
 
     fun cancel(context: Context, id: Long) {
         context.getSystemService(AlarmManager::class.java).cancel(pending(context, id))
+        setArmed(context, id, 0L)
     }
 
-    /** Re-arms every schedule (after a reboot, app update or clock change). */
+    /**
+     * Runs any start that was missed in the last [GRACE_MS], then re-arms every schedule.
+     * Called when the app opens, after a reboot / app update, and when the clock changes.
+     */
     fun scheduleAll(context: Context) {
         val store = PresetStore(context)
+        val now = System.currentTimeMillis()
         store.all().forEach { p ->
-            if (p.scheduleOn && schedule(context, p) == null && p.repeat == Repeat.ONCE) {
+            if (!p.scheduleOn) { setArmed(context, p.id, 0L); return@forEach }
+            val armedAt = armed(context, p.id)
+            if (isMissedButRecent(armedAt, now)) {
+                startNow(context, p)
+                afterStart(context, store, p, armedAt)
+            } else if (schedule(context, p) == null && p.repeat == Repeat.ONCE) {
                 store.save(p.copy(scheduleOn = false))   // one-off whose time has passed
+                setArmed(context, p.id, 0L)
             }
         }
+    }
+
+    // ---------- Starting a scheduled timer ----------
+
+    /**
+     * Starts [p] in the background. If Android (or the phone maker's battery manager)
+     * refuses a background start, falls back to a full-screen alarm notification that
+     * opens the app and starts the timer from there.
+     */
+    fun startNow(context: Context, p: Preset) {
+        TimerService.load(context)
+        if (TimerService.isRunning) return
+        try {
+            context.startForegroundService(TimerService.startIntent(context, p, scheduled = true))
+        } catch (e: Exception) {
+            showStartNotification(context, p)
+        }
+    }
+
+    /** After a start: a one-off is switched off, a repeating one is armed for its next time. */
+    private fun afterStart(context: Context, store: PresetStore, p: Preset, firedFor: Long) {
+        if (p.repeat == Repeat.ONCE) {
+            store.save(p.copy(scheduleOn = false))
+            setArmed(context, p.id, 0L)
+        } else {
+            // Look for the next start after this one, even if this alarm fired a little early.
+            schedule(context, p, maxOf(System.currentTimeMillis(), firedFor + 1000L))
+        }
+    }
+
+    private fun showStartNotification(context: Context, p: Preset) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(START_CHANNEL, context.getString(R.string.start_channel),
+                NotificationManager.IMPORTANCE_HIGH).apply { setBypassDnd(true) }
+        )
+        val open = PendingIntent.getActivity(
+            context, requestCode(p.id),
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_START_ID, p.id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val n = Notification.Builder(context, START_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle(p.name)
+            .setContentText(context.getString(R.string.start_notification_text))
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setColor(0xFFFF6B4A.toInt())
+            .setContentIntent(open)
+            .setFullScreenIntent(open, true)   // opens the app (even over the lock screen) and starts the timer
+            .setAutoCancel(true)
+            .build()
+        nm.notify(startNotificationId(p.id), n)
+    }
+
+    fun startNotificationId(id: Long) = 1000 + (requestCode(id) and 0xFFFF)
+
+    // ---------- Armed start times (to detect missed starts) ----------
+
+    private fun armed(context: Context, id: Long) =
+        context.getSharedPreferences(STATE, Context.MODE_PRIVATE).getLong("armed_$id", 0L)
+
+    private fun setArmed(context: Context, id: Long, at: Long) {
+        context.getSharedPreferences(STATE, Context.MODE_PRIVATE).edit().apply {
+            if (at > 0L) putLong("armed_$id", at) else remove("armed_$id")
+        }.commit()
     }
 
     fun canScheduleExact(context: Context): Boolean =
@@ -192,19 +284,8 @@ object Scheduler {
             val store = PresetStore(context)
             val p = store.get(intent.getLongExtra(EXTRA_ID, -1L)) ?: return
             if (!p.scheduleOn) return
-
-            TimerService.load(context)
-            if (!TimerService.isRunning) {
-                context.startForegroundService(TimerService.startIntent(context, p, scheduled = true))
-            }
-
-            if (p.repeat == Repeat.ONCE) {
-                store.save(p.copy(scheduleOn = false))
-            } else {
-                // Look for the next start after this one, even if this alarm fired a little early.
-                val firedFor = intent.getLongExtra(EXTRA_AT, 0L)
-                schedule(context, p, maxOf(System.currentTimeMillis(), firedFor + 1000L))
-            }
+            startNow(context, p)
+            afterStart(context, store, p, intent.getLongExtra(EXTRA_AT, 0L))
         }
     }
 

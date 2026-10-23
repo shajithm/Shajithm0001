@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Floating mini window over other apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Scheduled starts: alert that opens the app if a background start is refused -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Lets the user exempt the app from battery optimisation so scheduled starts aren't blocked -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Needed to use text-to-speech engines (voice announcements) -->
     <queries>
