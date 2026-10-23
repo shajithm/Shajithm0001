@@ -141,23 +141,26 @@ class ExpenseRepository(private val db: FirebaseFirestore, uid: String) {
 
     // ---------- mapping ----------
 
-    private fun toBudget(d: DocumentSnapshot): Budget? = Budget(
-        id = d.id,
-        month = d.getString("month") ?: return null,
-        category = d.getString("category") ?: return null,
-        amount = d.getDouble("amount") ?: 0.0,
-    )
+    private fun toBudget(d: DocumentSnapshot): Budget? {
+        val month = d.getString("month") ?: return null
+        val category = d.getString("category") ?: return null
+        return Budget(id = d.id, month = month, category = category, amount = d.getDouble("amount") ?: 0.0)
+    }
 
-    private fun toExpense(d: DocumentSnapshot): Expense? = Expense(
-        id = d.id,
-        month = d.getString("month") ?: return null,
-        date = d.getString("date") ?: return null,
-        category = d.getString("category") ?: "Other",
-        amount = d.getDouble("amount") ?: 0.0,
-        note = d.getString("note") ?: "",
-        createdAtMillis = d.getTimestamp("createdAt", DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            ?.toDate()?.time ?: 0L,
-    )
+    private fun toExpense(d: DocumentSnapshot): Expense? {
+        val month = d.getString("month") ?: return null
+        val date = d.getString("date") ?: return null
+        return Expense(
+            id = d.id,
+            month = month,
+            date = date,
+            category = d.getString("category") ?: "Other",
+            amount = d.getDouble("amount") ?: 0.0,
+            note = d.getString("note") ?: "",
+            createdAtMillis = d.getTimestamp("createdAt", DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?.toDate()?.time ?: 0L,
+        )
+    }
 
     private fun budgetId(month: String, category: String) =
         month + "_" + URLEncoder.encode(category, "UTF-8")
