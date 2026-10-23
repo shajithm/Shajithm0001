@@ -1,0 +1,46 @@
+name: Build Expense Tracker APK
+
+on:
+  push:
+    paths:
+      - "ExpenseTracker/**"
+      - ".github/workflows/build-expense-tracker.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ExpenseTracker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Repository secret GOOGLE_SERVICES_JSON = full contents of google-services.json
+      # (Settings → Secrets and variables → Actions → New repository secret).
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Missing GOOGLE_SERVICES_JSON secret. See ExpenseTracker/README.md step 1."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseTracker-apk
+          path: ExpenseTracker/app/build/outputs/apk/debug/app-debug.apk
