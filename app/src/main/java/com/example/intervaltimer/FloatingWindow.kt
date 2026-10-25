@@ -183,7 +183,7 @@ object FloatingWindow {
                 countText.text = t
                 countText.textSize = if (t.length <= 5) 32f else if (t.length <= 8) 26f else 20f
                 bar.rounds = TimerService.rounds
-                bar.progress = e.toFloat() / TimerService.roundMs
+                bar.progress = TimerService.plan.progress(e)
                 finishedSince = 0L
             }
             TimerService.finished -> {

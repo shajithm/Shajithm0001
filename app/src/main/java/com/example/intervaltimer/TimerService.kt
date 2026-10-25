@@ -25,7 +25,8 @@ import android.os.Vibrator
 import android.os.VibratorManager
 
 /**
- * Runs one continuous clock of [rounds] x [roundMs] (from seconds up to many days).
+ * Runs one continuous clock through a list of rounds, each with its own length
+ * (from seconds up to many days).
  *
  * Everything is measured from a single start time, so playing an alarm never pauses
  * or shifts the countdown. The run is saved to storage, and an exact "alarm clock"
@@ -37,6 +38,7 @@ class TimerService : Service() {
     companion object {
         const val EXTRA_INTERVAL_MS = "interval_ms"
         const val EXTRA_ROUNDS = "rounds"
+        const val EXTRA_LENGTHS = "lengths"
         const val EXTRA_NAME = "name"
         const val EXTRA_SCHEDULED = "scheduled"
         const val EXTRA_SOUND = "sound"
@@ -59,10 +61,10 @@ class TimerService : Service() {
             private set
         @Volatile var finished = false
             private set
-        @Volatile var roundMs = 3 * 60_000L
+        /** The rounds of the current (or last) run. */
+        @Volatile var plan = RoundPlan(listOf(3 * 60_000L))
             private set
-        @Volatile var rounds = 10
-            private set
+        val rounds get() = plan.rounds
         @Volatile var name = ""
             private set
         @Volatile var sound = ""
@@ -78,8 +80,7 @@ class TimerService : Service() {
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_NAME, p.name)
                 .putExtra(EXTRA_SOUND, p.sound)
-                .putExtra(EXTRA_INTERVAL_MS, p.intervalMs)
-                .putExtra(EXTRA_ROUNDS, p.rounds)
+                .putExtra(EXTRA_LENGTHS, p.lengths.toLongArray())
                 .putExtra(EXTRA_FLOATING, p.floating)
                 .putExtra(EXTRA_VOICE, p.voice.name)
                 .putExtra(EXTRA_SCHEDULED, scheduled)
@@ -88,7 +89,7 @@ class TimerService : Service() {
             private set
 
         val isRunning get() = startedAt != 0L
-        val totalMs get() = roundMs * rounds
+        val totalMs get() = plan.totalMs
 
         fun clearFinished() { finished = false }
 
@@ -97,12 +98,13 @@ class TimerService : Service() {
             else (System.currentTimeMillis() - startedAt).coerceIn(0L, totalMs)
 
         /** 1-based round currently counting down. */
-        fun currentRound(elapsed: Long): Int =
-            (elapsed / roundMs + 1).toInt().coerceAtMost(rounds)
+        fun currentRound(elapsed: Long): Int = plan.current(elapsed)
+
+        /** Length of the round counting down at [elapsed]. */
+        fun currentRoundLength(elapsed: Long): Long = plan.lengthOf(plan.current(elapsed))
 
         /** Time left in the current round. */
-        fun roundRemaining(elapsed: Long): Long =
-            if (elapsed >= totalMs) 0L else roundMs - elapsed % roundMs
+        fun roundRemaining(elapsed: Long): Long = plan.remaining(elapsed)
 
         fun format(ms: Long): String = Durations.clock(ms)
 
@@ -115,8 +117,11 @@ class TimerService : Service() {
             sound = p.getString("sound", "") ?: ""
             floating = p.getBoolean("floating", false)
             voice = runCatching { VoiceChoice.valueOf(p.getString("voice", "OFF")!!) }.getOrDefault(VoiceChoice.OFF)
-            roundMs = p.getLong("roundMs", roundMs)
-            rounds = p.getInt("rounds", rounds)
+            val saved = RoundPlan.decode(p.getString("lengths", null))
+            plan = RoundPlan(saved.ifEmpty {
+                // run saved by an older version
+                List(p.getInt("rounds", 10).coerceAtLeast(1)) { p.getLong("roundMs", 3 * 60_000L) }
+            })
             played = p.getInt("played", 0)
             finished = false
             startedAt = p.getLong("start", 0L)
@@ -158,8 +163,7 @@ class TimerService : Service() {
                 if (!isRunning) begin(
                     intent?.getStringExtra(EXTRA_NAME) ?: "",
                     intent?.getStringExtra(EXTRA_SOUND) ?: "",
-                    intent?.getLongExtra(EXTRA_INTERVAL_MS, roundMs) ?: roundMs,
-                    intent?.getIntExtra(EXTRA_ROUNDS, rounds) ?: rounds,
+                    intent?.getLongArrayExtra(EXTRA_LENGTHS)?.toList() ?: emptyList(),
                     intent?.getBooleanExtra(EXTRA_SCHEDULED, false) ?: false,
                     intent?.getBooleanExtra(EXTRA_FLOATING, false) ?: false,
                     runCatching { VoiceChoice.valueOf(intent?.getStringExtra(EXTRA_VOICE) ?: "OFF") }
@@ -178,15 +182,16 @@ class TimerService : Service() {
     }
 
     private fun begin(
-        presetName: String, soundUri: String, intervalMs: Long, count: Int, scheduled: Boolean,
+        presetName: String, soundUri: String, lengths: List<Long>, scheduled: Boolean,
         showFloating: Boolean, voiceChoice: VoiceChoice,
     ) {
         name = presetName
         sound = soundUri
         floating = showFloating
         voice = voiceChoice
-        roundMs = intervalMs.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
-        rounds = count.coerceIn(1, 99)
+        plan = RoundPlan(lengths.take(99).map {
+            it.coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
+        })
         played = 0
         finished = false
         startedAt = System.currentTimeMillis()
@@ -200,7 +205,7 @@ class TimerService : Service() {
             // Without exact alarms, keep the CPU awake instead (fine for shorter runs).
             longWakeLock = wakeLock("IntervalTimer::run").apply { acquire(totalMs + 60_000L) }
         }
-        announce(Announcements.start(name, rounds, roundMs), if (scheduled) 600L else 0L)
+        announce(Announcements.start(name, plan), if (scheduled) 600L else 0L)
         check()
         if (!FloatingWindow.appVisible) FloatingWindow.show(this)
     }
@@ -211,19 +216,19 @@ class TimerService : Service() {
         if (!isRunning) return
         val now = System.currentTimeMillis()
         val e = elapsed()
-        val due = (e / roundMs).toInt().coerceAtMost(rounds)
+        val due = plan.done(e)
         if (due > played) {
-            val lateBy = now - (startedAt + due * roundMs)
+            val lateBy = now - (startedAt + plan.endOf(due))
             played = due
             save()
             if (lateBy < LATE_LIMIT_MS) {
                 val alarmLength = playAlarm()
-                announce(Announcements.round(due, rounds, totalMs - due * roundMs), alarmLength + 300L)
+                announce(Announcements.round(due, plan), alarmLength + 300L)
             }
         }
         if (e >= totalMs) { finish(); return }
 
-        val nextAt = startedAt + (played + 1) * roundMs
+        val nextAt = startedAt + plan.endOf(played + 1)
         armBoundary(nextAt)
         updateNotification(nextAt)
         // Backup check while the phone is awake; the exact alarm covers deep sleep.
@@ -294,7 +299,7 @@ class TimerService : Service() {
     private fun playAlarm(): Long {
         // Fire-and-forget: the sound plays on its own while the countdown continues.
         val ring = customRingtone()
-        val length = (if (ring != null) RINGTONE_MS else BEEP_MS).coerceAtMost(roundMs / 3)
+        val length = (if (ring != null) RINGTONE_MS else BEEP_MS).coerceAtMost(plan.lengths.min() / 3)
         shortWake(length + if (voiceOn()) 7_000L else 0L)
         val played = ring != null && runCatching {
             handler.removeCallbacks(stopRingtone)
@@ -364,8 +369,7 @@ class TimerService : Service() {
             .putString("sound", sound)
             .putBoolean("floating", floating)
             .putString("voice", voice.name)
-            .putLong("roundMs", roundMs)
-            .putInt("rounds", rounds)
+            .putString("lengths", plan.encode())
             .putLong("start", startedAt)
             .putInt("played", played)
             .commit()
@@ -405,7 +409,7 @@ class TimerService : Service() {
 
     private fun goForeground() {
         createChannel()
-        val n = buildNotification(if (isRunning) startedAt + (played + 1) * roundMs else 0L)
+        val n = buildNotification(if (isRunning) startedAt + plan.endOf(played + 1) else 0L)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -432,8 +436,9 @@ class TimerService : Service() {
         )
         val text = when {
             finished -> getString(R.string.done_notification, rounds)
-            isRunning -> getString(R.string.notification_round,
-                (played + 1).coerceAtMost(rounds), rounds, Durations.human(roundMs))
+            isRunning -> getString(
+                if (plan.uniform) R.string.notification_round else R.string.notification_round_custom,
+                (played + 1).coerceAtMost(rounds), rounds, Durations.human(plan.lengthOf(played + 1)))
             else -> getString(R.string.app_name)
         }
         return Notification.Builder(this, CHANNEL_ID)

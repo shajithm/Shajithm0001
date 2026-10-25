@@ -53,6 +53,14 @@ class MainActivity : Activity() {
     private var intervalMs = 0L
     private var rounds = 0
     private var sound = ""
+    /** "Each round different" mode, and the length of each round in that mode. */
+    private var customMode = false
+    private val custom = mutableListOf<Long>()
+    private lateinit var modeSame: TextView
+    private lateinit var modeCustom: TextView
+    private lateinit var uniformSection: View
+    private lateinit var customSection: View
+    private lateinit var customList: LinearLayout
 
     // Schedule being edited
     private var schedOn = false
@@ -175,6 +183,16 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.sched_repeat_row).setOnClickListener { pickRepeat() }
         schedDateRow.setOnClickListener { pickDate() }
         buildDayChips()
+
+        modeSame = findViewById(R.id.mode_same)
+        modeCustom = findViewById(R.id.mode_custom)
+        uniformSection = findViewById(R.id.uniform_section)
+        customSection = findViewById(R.id.custom_section)
+        customList = findViewById(R.id.custom_list)
+        modeSame.setOnClickListener { setCustomMode(false) }
+        modeCustom.setOnClickListener { setCustomMode(true) }
+        findViewById<View>(R.id.custom_add).setOnClickListener { addRound() }
+        findViewById<View>(R.id.custom_duplicate).setOnClickListener { repeatLastRound() }
 
         soundValue = findViewById(R.id.sound_value)
         findViewById<View>(R.id.sound_row).setOnClickListener { pickSound() }
@@ -316,9 +334,11 @@ class MainActivity : Activity() {
         presets.forEach { p ->
             val item = inflater.inflate(R.layout.item_preset, presetContainer, false)
             item.findViewById<TextView>(R.id.preset_name).text = p.name
-            item.findViewById<TextView>(R.id.preset_detail).text = getString(
-                R.string.preset_detail,
-                Durations.human(p.intervalMs), p.rounds, Durations.human(p.totalMs)
+            item.findViewById<TextView>(R.id.preset_detail).text = (
+                if (p.custom.isNotEmpty())
+                    getString(R.string.custom_detail, p.roundCount, Durations.human(p.totalMs))
+                else getString(R.string.preset_detail,
+                    Durations.human(p.intervalMs), p.rounds, Durations.human(p.totalMs))
             ) + (if (p.voice != VoiceChoice.OFF) "  ·  🔊" else "") + (if (p.floating) "  ·  ⧉" else "")
             val sched = item.findViewById<TextView>(R.id.preset_schedule)
             if (p.scheduleOn) {
@@ -343,6 +363,9 @@ class MainActivity : Activity() {
     private fun openEditor(preset: Preset?) {
         editingId = preset?.id
         intervalMs = preset?.intervalMs ?: AppSettings.defaultIntervalMs(this)
+        custom.clear()
+        preset?.custom?.let { custom.addAll(it) }
+        customMode = custom.isNotEmpty()
         rounds = preset?.rounds ?: AppSettings.defaultRounds(this)
         sound = preset?.sound ?: ""
         floating = preset?.floating ?: false
@@ -383,8 +406,9 @@ class MainActivity : Activity() {
     private fun editorPreset(id: Long) = Preset(
         id = id,
         name = nameInput.text.toString().trim().ifEmpty { defaultName() },
-        intervalMs = intervalMs,
-        rounds = rounds,
+        intervalMs = if (customMode) custom.firstOrNull() ?: intervalMs else intervalMs,
+        rounds = if (customMode) custom.size else rounds,
+        custom = if (customMode) custom.toList() else emptyList(),
         scheduleOn = schedOn,
         hour = schedHour,
         minute = schedMinute,
@@ -400,6 +424,9 @@ class MainActivity : Activity() {
     private fun saveEditor(): Preset? {
         val preset = editorPreset(editingId ?: store.newId())
         val missing = when {
+            customMode && custom.isEmpty() -> R.string.need_rounds
+            customMode && custom.any { it < Durations.MIN_INTERVAL_MS } -> R.string.need_round_lengths
+            customMode -> 0
             preset.intervalMs < Durations.MIN_INTERVAL_MS && preset.rounds < 1 -> R.string.need_both
             preset.intervalMs < Durations.MIN_INTERVAL_MS -> R.string.need_interval
             preset.rounds < 1 -> R.string.need_rounds
@@ -492,7 +519,95 @@ class MainActivity : Activity() {
         intervalValue.text = text
         intervalValue.textSize = when { text.length <= 5 -> 44f; text.length <= 8 -> 36f; else -> 26f }
         roundsValue.text = rounds.toString()
-        totalValue.text = Durations.human(intervalMs * rounds)
+
+        modeSame.isSelected = !customMode
+        modeCustom.isSelected = customMode
+        uniformSection.visibility = if (customMode) View.GONE else View.VISIBLE
+        customSection.visibility = if (customMode) View.VISIBLE else View.GONE
+        if (customMode) buildRoundList()
+        totalValue.text = Durations.human(if (customMode) custom.sum() else intervalMs * rounds)
+    }
+
+    // ---- Each round its own length ----
+
+    private fun setCustomMode(on: Boolean) {
+        hideKeyboard()
+        if (on == customMode) return
+        if (on && custom.isEmpty() && rounds > 0 && intervalMs >= Durations.MIN_INTERVAL_MS) {
+            // Start from the current "same length" setup, so it only needs adjusting.
+            repeat(rounds) { custom.add(intervalMs) }
+        }
+        if (!on && custom.isNotEmpty()) {
+            // Keep the round count and use the first round's length.
+            rounds = custom.size
+            if (custom[0] >= Durations.MIN_INTERVAL_MS) intervalMs = custom[0]
+        }
+        customMode = on
+        updateEditor()
+    }
+
+    private fun buildRoundList() {
+        customList.removeAllViews()
+        if (custom.isEmpty()) {
+            customList.addView(TextView(this).apply {
+                text = getString(R.string.no_rounds_yet)
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 14f
+                setPadding(0, dp(12), 0, dp(12))
+            })
+            return
+        }
+        custom.forEachIndexed { i, ms ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(52)
+            }
+            row.addView(TextView(this).apply {
+                text = getString(R.string.round_n, i + 1)
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 15f
+            }, LinearLayout.LayoutParams(dp(84), LinearLayout.LayoutParams.WRAP_CONTENT))
+            row.addView(TextView(this).apply {
+                text = if (ms > 0) Durations.clock(ms) else "--:--"
+                setTextColor(getColor(if (ms >= Durations.MIN_INTERVAL_MS) R.color.text_primary else R.color.accent))
+                textSize = 22f
+                typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+                fontFeatureSettings = "tnum"
+                setBackgroundResource(android.R.drawable.list_selector_background)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                setOnClickListener {
+                    hideKeyboard()
+                    pickDuration(custom[i]) { custom[i] = it; updateEditor() }
+                }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(TextView(this).apply {
+                text = "✕"
+                textSize = 16f
+                gravity = Gravity.CENTER
+                setTextColor(getColor(R.color.text_secondary))
+                contentDescription = getString(R.string.remove_round)
+                setBackgroundResource(android.R.drawable.list_selector_background)
+                setOnClickListener { custom.removeAt(i); updateEditor() }
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            if (i > 0) customList.addView(View(this).apply {
+                setBackgroundColor(getColor(R.color.track))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
+            customList.addView(row)
+        }
+    }
+
+    private fun addRound() {
+        hideKeyboard()
+        if (custom.size >= MAX_ROUNDS) return
+        val suggested = custom.lastOrNull() ?: intervalMs.takeIf { it >= Durations.MIN_INTERVAL_MS } ?: 0L
+        pickDuration(suggested) { if (it > 0) { custom.add(it); updateEditor() } }
+    }
+
+    private fun repeatLastRound() {
+        hideKeyboard()
+        val last = custom.lastOrNull() ?: return addRound()
+        if (custom.size < MAX_ROUNDS) { custom.add(last); updateEditor() }
     }
 
     private fun pickInterval() {
@@ -686,7 +801,7 @@ class MainActivity : Activity() {
         val e = TimerService.elapsed()
         runName.text = TimerService.name
         roundsBar.rounds = n
-        roundsBar.progress = e.toFloat() / TimerService.roundMs
+        roundsBar.progress = TimerService.plan.progress(e)
 
         if (finished) {
             ring.fraction = 1f
@@ -700,7 +815,7 @@ class MainActivity : Activity() {
         } else {
             val remaining = TimerService.roundRemaining(e)
             ring.setRingColor(getColor(R.color.accent))
-            ring.fraction = remaining.toFloat() / TimerService.roundMs
+            ring.fraction = remaining.toFloat() / TimerService.currentRoundLength(e)
             roundLabel.text = getString(R.string.round_of, TimerService.currentRound(e), n)
             val text = TimerService.format(remaining)
             countdown.text = text
@@ -901,7 +1016,7 @@ class MainActivity : Activity() {
     private fun previewVoice(choice: VoiceChoice) {
         val a = previewAnnouncer ?: Announcer(this).also { previewAnnouncer = it }
         a.setChoice(choice)
-        a.speak(Announcements.round(3, 10, 21 * Durations.MINUTE))
+        a.speak(Announcements.round(3, RoundPlan(List(10) { 3 * Durations.MINUTE })))
         handler.postDelayed({
             if (a.isReady && !a.realVoice) Toast.makeText(this, R.string.voice_fallback, Toast.LENGTH_LONG).show()
         }, 2500L)

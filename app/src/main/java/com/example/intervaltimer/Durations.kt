@@ -75,21 +75,29 @@ object Announcements {
             .joinToString(" ") { (n, unit) -> "$n $unit" + if (n == 1L) "" else "s" }
     }
 
-    /** At the start: "Starting Morning workout. 10 rounds of 3 minutes." */
-    fun start(name: String, rounds: Int, roundMs: Long): String {
+    /**
+     * At the start: "Starting Morning workout. 10 rounds of 3 minutes." or, when rounds
+     * differ, "Starting Morning workout. 5 rounds, 21 minutes in total. First round: 3 minutes."
+     */
+    fun start(name: String, plan: RoundPlan): String {
         val who = if (name.isNotBlank() && name.length <= 40) "Starting $name." else "Starting."
-        val r = if (rounds == 1) "1 round" else "$rounds rounds"
-        return "$who $r of ${spoken(roundMs)}."
+        val n = plan.rounds
+        val r = if (n == 1) "1 round" else "$n rounds"
+        return if (plan.uniform) "$who $r of ${spoken(plan.lengthOf(1))}."
+        else "$who $r, ${spoken(plan.totalMs)} in total. First round: ${spoken(plan.lengthOf(1))}."
     }
 
     /**
      * After round [done] of [rounds] ends:
      * "Round 3 of 10 complete. 7 rounds, 21 minutes left." or "All 10 rounds complete."
      */
-    fun round(done: Int, rounds: Int, remainingMs: Long): String {
+    fun round(done: Int, plan: RoundPlan): String {
+        val rounds = plan.rounds
         if (done >= rounds) return if (rounds == 1) "Round complete. Well done." else "All $rounds rounds complete. Well done."
         val left = rounds - done
         val r = if (left == 1) "1 round" else "$left rounds"
-        return "Round $done of $rounds complete. $r, ${spoken(remainingMs)} left."
+        val remaining = plan.totalMs - plan.endOf(done)
+        val next = if (plan.uniform) "" else " Next round: ${spoken(plan.lengthOf(done + 1))}."
+        return "Round $done of $rounds complete.$next $r, ${spoken(remaining)} left."
     }
 }

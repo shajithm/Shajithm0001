@@ -136,6 +136,16 @@
     <string name="schedule_setup_message">Some phone settings may stop this timer from starting on its own. Review them now?</string>
     <string name="review">Review</string>
     <string name="later">Later</string>
+    <string name="mode_same">Same length</string>
+    <string name="mode_custom">Each round different</string>
+    <string name="add_round">+ Add round</string>
+    <string name="repeat_last_round">⧉ Repeat last</string>
+    <string name="round_n">Round %1$d</string>
+    <string name="remove_round">Remove round</string>
+    <string name="no_rounds_yet">No rounds yet. Tap “Add round”.</string>
+    <string name="need_round_lengths">Please set every round to at least 5 seconds.</string>
+    <string name="custom_detail">%1$d rounds (each different) · %2$s total</string>
+    <string name="notification_round_custom">Round %1$d of %2$d · %3$s · next alarm in</string>
     <plurals name="exported">
         <item quantity="one">Exported %d timer</item>
         <item quantity="other">Exported %d timers</item>

@@ -28,8 +28,13 @@ data class Preset(
     val floating: Boolean = false,
     /** Voice for this timer's announcements (OFF = silent). */
     val voice: VoiceChoice = VoiceChoice.OFF,
+    /** Different length for each round (ms). Empty = every round is [intervalMs] long, [rounds] times. */
+    val custom: List<Long> = emptyList(),
 ) {
-    val totalMs get() = intervalMs * rounds
+    /** Length of every round, in order. */
+    val lengths: List<Long> get() = if (custom.isNotEmpty()) custom else List(rounds.coerceAtLeast(0)) { intervalMs }
+    val roundCount get() = lengths.size
+    val totalMs get() = lengths.sum()
 
     companion object {
         const val WEEKDAYS = 0b0011111
@@ -125,6 +130,7 @@ class PresetStore(context: Context) {
             .put("sound", p.sound)
             .put("floating", p.floating)
             .put("voice", p.voice.name)
+            .put("custom", JSONArray().apply { p.custom.forEach { put(it) } })
 
         /** Reads one timer, clamping values so a hand-edited file can't break the app. */
         fun fromJson(o: JSONObject) = Preset(
@@ -141,6 +147,11 @@ class PresetStore(context: Context) {
             sound = o.optString("sound", ""),
             floating = o.optBoolean("floating", false),
             voice = runCatching { VoiceChoice.valueOf(o.optString("voice")) }.getOrDefault(VoiceChoice.OFF),
+            custom = o.optJSONArray("custom")?.let { arr ->
+                (0 until arr.length()).map {
+                    arr.getLong(it).coerceIn(Durations.MIN_INTERVAL_MS, Durations.MAX_INTERVAL_MS)
+                }.take(99)
+            } ?: emptyList(),
         )
 
         /** The file written by Export. */
