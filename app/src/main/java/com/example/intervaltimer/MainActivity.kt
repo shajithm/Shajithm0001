@@ -461,15 +461,15 @@ class MainActivity : Activity() {
             Scheduler.nextText(this, preset)?.let {
                 Toast.makeText(this, getString(R.string.scheduled_toast, preset.name, it), Toast.LENGTH_LONG).show()
             }
-            if (!scheduleReady() || isXiaomi) offerScheduleSetup()
+            if (!scheduleReady() || vendor != Vendor.OTHER) offerScheduleSetup()
         }
         return preset
     }
 
     private fun offerScheduleSetup() {
-        if (isXiaomi && scheduleReady() && getSharedPreferences("settings", MODE_PRIVATE)
-                .getBoolean("xiaomi_setup_shown", false)) return
-        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xiaomi_setup_shown", true).apply()
+        if (vendor != Vendor.OTHER && scheduleReady() && getSharedPreferences("settings", MODE_PRIVATE)
+                .getBoolean("vendor_setup_shown", false)) return
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("vendor_setup_shown", true).apply()
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(R.string.schedule_setup_title)
             .setMessage(R.string.schedule_setup_message)
@@ -894,8 +894,30 @@ class MainActivity : Activity() {
 
     // ---- Scheduled-start checklist ----
 
-    private val isXiaomi = Build.MANUFACTURER.lowercase(Locale.ROOT).let {
-        "xiaomi" in it || "redmi" in it || "poco" in it
+    /** Phone makers with their own background-app killers that need extra settings. */
+    private enum class Vendor { HONOR, HUAWEI, XIAOMI, OTHER }
+
+    private val vendor: Vendor = (Build.MANUFACTURER + " " + Build.BRAND).lowercase(Locale.ROOT).let {
+        when {
+            "honor" in it -> Vendor.HONOR
+            "huawei" in it -> Vendor.HUAWEI
+            "xiaomi" in it || "redmi" in it || "poco" in it -> Vendor.XIAOMI
+            else -> Vendor.OTHER
+        }
+    }
+
+    /** Tries each screen in turn; falls back to the app's own settings page. */
+    private fun openFirst(vararg components: Pair<String, String>) {
+        for ((pkg, cls) in components) {
+            val ok = runCatching {
+                startActivity(Intent().setComponent(android.content.ComponentName(pkg, cls))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            if (ok) return
+        }
+        runCatching {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     private fun notificationsOk() =
@@ -946,7 +968,18 @@ class MainActivity : Activity() {
                 open(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
             }
         }
-        if (isXiaomi) {
+        if (vendor == Vendor.HONOR || vendor == Vendor.HUAWEI) {
+            // MagicOS / EMUI: Settings → Apps → App launch
+            checkRow(R.string.check_app_launch, null) {
+                openFirst(
+                    "com.hihonor.systemmanager" to "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+                    "com.huawei.systemmanager" to "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+                    "com.huawei.systemmanager" to "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity",
+                )
+            }
+            checkRow(R.string.check_app_info, null) { open(Settings.ACTION_APPLICATION_DETAILS_SETTINGS) }
+        }
+        if (vendor == Vendor.XIAOMI) {
             checkRow(R.string.check_autostart, null) {
                 val ok = runCatching {
                     startActivity(Intent().setComponent(android.content.ComponentName(
@@ -962,7 +995,11 @@ class MainActivity : Activity() {
             updateSettings()
         }
         checklistHint.text = getString(R.string.stay_ready_hint) +
-            getString(if (isXiaomi) R.string.checklist_hint_xiaomi else R.string.checklist_hint)
+            getString(when (vendor) {
+                Vendor.HONOR, Vendor.HUAWEI -> R.string.checklist_hint_honor
+                Vendor.XIAOMI -> R.string.checklist_hint_xiaomi
+                Vendor.OTHER -> R.string.checklist_hint
+            })
         scheduleLog.text = ScheduleLog.read(this).ifBlank { getString(R.string.log_empty) }
     }
 

@@ -127,6 +127,9 @@
     <string name="check_fullscreen">Full-screen alerts</string>
     <string name="check_autostart">Xiaomi: Autostart</string>
     <string name="check_app_settings">Xiaomi: battery saver &amp; pop-ups</string>
+    <string name="check_app_launch">Honor: App launch</string>
+    <string name="check_app_info">Honor: app battery settings</string>
+    <string name="checklist_hint_honor">All of these must be allowed for timers to start on their own at the scheduled time. On Honor also: in App launch, find Interval Timer, turn OFF “Manage automatically” and turn ON Auto-launch, Secondary launch and Run in background; in the app’s Battery settings allow background activity; and lock Interval Timer in Recents (swipe down on its card) so “clear all” doesn’t close it.</string>
     <string name="check_ok">Allowed ✓</string>
     <string name="check_fix">Tap to allow ›</string>
     <string name="check_open">Open ›</string>
