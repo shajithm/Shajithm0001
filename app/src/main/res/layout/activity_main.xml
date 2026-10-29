@@ -755,6 +755,28 @@
                 <TextView
                     style="@style/SectionLabel"
                     android:layout_marginTop="28dp"
+                    android:text="@string/log_label" />
+
+                <LinearLayout
+                    style="@style/Card"
+                    android:layout_marginTop="10dp"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="14dp">
+
+                    <TextView
+                        android:id="@+id/schedule_log"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:lineSpacingExtra="3dp"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:layout_marginTop="28dp"
                     android:text="@string/calendar_label" />
 
                 <LinearLayout

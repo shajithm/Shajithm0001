@@ -94,3 +94,16 @@ class MissedStartTest {
     @Test fun futureIsNotMissed() = org.junit.Assert.assertFalse(Scheduler.isMissedButRecent(now + 1_000L, now))
     @Test fun notArmedIsIgnored() = org.junit.Assert.assertFalse(Scheduler.isMissedButRecent(0L, now))
 }
+
+class ScheduleLogTest {
+    @Test fun newestFirstAndTrimmed() {
+        var log = ""
+        for (i in 1..50) log = ScheduleLog.append(log, "line $i")
+        val lines = log.lines()
+        org.junit.Assert.assertEquals(ScheduleLog.MAX_LINES, lines.size)
+        org.junit.Assert.assertEquals("line 50", lines.first())
+        org.junit.Assert.assertEquals("line 11", lines.last())
+    }
+
+    @Test fun startsEmpty() = org.junit.Assert.assertEquals("first", ScheduleLog.append("", "first"))
+}

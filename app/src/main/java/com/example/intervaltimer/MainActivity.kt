@@ -104,6 +104,7 @@ class MainActivity : Activity() {
     private lateinit var setWeekStart: TextView
     private lateinit var checklist: LinearLayout
     private lateinit var checklistHint: TextView
+    private lateinit var scheduleLog: TextView
     // "While running" options of the timer being edited
     private var floating = false
     private var voice = VoiceChoice.OFF
@@ -215,6 +216,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.set_week_start_row).setOnClickListener { pickWeekStart() }
         checklist = findViewById(R.id.checklist)
         checklistHint = findViewById(R.id.checklist_hint)
+        scheduleLog = findViewById(R.id.schedule_log)
 
         editFloatingSwitch = findViewById(R.id.edit_floating_switch)
         editFloatingHint = findViewById(R.id.edit_floating_hint)
@@ -269,6 +271,7 @@ class MainActivity : Activity() {
         if (TimerService.isRunning && !TimerService.serviceAlive) TimerService.resume(this)
         // Re-arm schedules, and run one that was missed in the last few minutes.
         Scheduler.scheduleAll(this)
+        TimerService.refreshStandby(this)
         if (screen == Screen.LIST) buildList()
         handler.post(refresh)
     }
@@ -286,7 +289,10 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         getSystemService(android.app.NotificationManager::class.java).cancel(Scheduler.startNotificationId(id))
         TimerService.load(this)
-        if (!TimerService.isRunning) store.get(id)?.let { startTimer(it, scheduled = true) }
+        if (!TimerService.isRunning) store.get(id)?.let {
+            ScheduleLog.add(this, "Started “${it.name}” from the alert")
+            startTimer(it, scheduled = true)
+        }
     }
 
     override fun onStart() {
@@ -448,6 +454,7 @@ class MainActivity : Activity() {
         }
         store.save(preset)
         Scheduler.schedule(this, preset)
+        TimerService.refreshStandby(this)
         editingId = preset.id
         closeEditor()
         if (preset.scheduleOn) {
@@ -499,6 +506,7 @@ class MainActivity : Activity() {
             .setMessage(R.string.delete_message)
             .setPositiveButton(R.string.delete) { _, _ ->
                 Scheduler.cancel(this, id); store.delete(id); closeEditor()
+                TimerService.refreshStandby(this)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -906,6 +914,13 @@ class MainActivity : Activity() {
     private fun buildChecklist() {
         checklist.removeAllViews()
         val pkg = Uri.parse("package:$packageName")
+        val ready = AppSettings.stayReady(this)
+        valueRow(getString(R.string.check_stay_ready), getString(if (ready) R.string.on_ok else R.string.off_tap),
+            if (ready) R.color.success else R.color.accent) {
+            AppSettings.setStayReady(this, !ready)
+            TimerService.refreshStandby(this)
+            updateSettings()
+        }
         fun open(action: String, data: Uri? = pkg) = runCatching {
             startActivity(Intent(action).apply { if (data != null) setData(data) })
         }.isSuccess
@@ -941,11 +956,25 @@ class MainActivity : Activity() {
             }
             checkRow(R.string.check_app_settings, null) { open(Settings.ACTION_APPLICATION_DETAILS_SETTINGS) }
         }
-        checklistHint.text = getString(if (isXiaomi) R.string.checklist_hint_xiaomi else R.string.checklist_hint)
+        valueRow(getString(R.string.check_test), getString(R.string.test_go), R.color.text_primary) {
+            Scheduler.scheduleTest(this)
+            Toast.makeText(this, R.string.test_scheduled, Toast.LENGTH_LONG).show()
+            updateSettings()
+        }
+        checklistHint.text = getString(R.string.stay_ready_hint) +
+            getString(if (isXiaomi) R.string.checklist_hint_xiaomi else R.string.checklist_hint)
+        scheduleLog.text = ScheduleLog.read(this).ifBlank { getString(R.string.log_empty) }
     }
 
     /** One checklist row. [ok]: true = allowed, false = needs fixing, null = can't be checked (just open). */
-    private fun checkRow(label: Int, ok: Boolean?, action: () -> Unit) {
+    private fun checkRow(label: Int, ok: Boolean?, action: () -> Unit) = valueRow(
+        getString(label),
+        getString(when (ok) { true -> R.string.check_ok; false -> R.string.check_fix; null -> R.string.check_open }),
+        when (ok) { true -> R.color.success; false -> R.color.accent; null -> R.color.text_primary },
+        action,
+    )
+
+    private fun valueRow(label: String, value: String, valueColor: Int, action: () -> Unit) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -955,14 +984,14 @@ class MainActivity : Activity() {
             setOnClickListener { action() }
         }
         row.addView(TextView(this).apply {
-            text = getString(label)
+            text = label
             textSize = 16f
             setTextColor(getColor(R.color.text_secondary))
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(TextView(this).apply {
-            text = getString(when (ok) { true -> R.string.check_ok; false -> R.string.check_fix; null -> R.string.check_open })
+            text = value
             textSize = 15f
-            setTextColor(getColor(when (ok) { true -> R.color.success; false -> R.color.accent; null -> R.color.text_primary }))
+            setTextColor(getColor(valueColor))
         })
         checklist.addView(row)
     }
@@ -1137,6 +1166,7 @@ class MainActivity : Activity() {
         val (merged, added) = PresetStore.merge(existing, incoming, store.newId())
         store.replaceAll(merged)
         Scheduler.scheduleAll(this)
+        TimerService.refreshStandby(this)
         buildList()
         val skipped = incoming.size - added
         val msg = resources.getQuantityString(R.plurals.imported, added, added) +

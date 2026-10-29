@@ -28,6 +28,8 @@ object Scheduler {
     private const val EXTRA_ID = "preset_id"
     private const val EXTRA_AT = "trigger_at"
     const val EXTRA_START_ID = "start_preset_id"
+    private const val EXTRA_TEST = "test_start"
+    private const val TEST_REQUEST = 0x7E57
     private const val STATE = "schedule_state"
     private const val START_CHANNEL = "scheduled_start"
 
@@ -101,9 +103,46 @@ object Scheduler {
         } else {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context, p.id, at))
         }
+        if (armed(context, p.id) != at) ScheduleLog.add(context, "Set “${p.name}” for ${whenText(at)}")
         setArmed(context, p.id, at)
         return at
     }
+
+    /** The soonest scheduled start among all timers, or null if nothing is scheduled. */
+    fun nextStart(context: Context): Pair<Preset, Long>? =
+        PresetStore(context).all()
+            .filter { it.scheduleOn }
+            .mapNotNull { p -> nextMillis(p)?.let { p to it } }
+            .minByOrNull { it.second }
+
+    fun whenText(millis: Long): String =
+        LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("EEE d MMM, HH:mm"))
+
+    /** A one-off 3 × 10-second test run that starts in one minute, exactly like a scheduled timer. */
+    fun scheduleTest(context: Context): Long {
+        val at = System.currentTimeMillis() + 60_000L
+        val pi = PendingIntent.getBroadcast(
+            context, TEST_REQUEST,
+            Intent(context, AlarmReceiver::class.java)
+                .setAction("com.example.intervaltimer.TEST_START")
+                .putExtra(EXTRA_TEST, true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val am = context.getSystemService(AlarmManager::class.java)
+        val show = PendingIntent.getActivity(
+            context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        if (canScheduleExact(context)) am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi)
+        else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+        ScheduleLog.add(context, "Test set for ${whenText(at).substringAfter(", ")}")
+        return at
+    }
+
+    private fun testPreset(context: Context) = Preset(
+        id = -1L, name = context.getString(R.string.test_timer_name),
+        intervalMs = 10_000L, rounds = 3,
+    )
 
     fun cancel(context: Context, id: Long) {
         context.getSystemService(AlarmManager::class.java).cancel(pending(context, id))
@@ -121,6 +160,7 @@ object Scheduler {
             if (!p.scheduleOn) { setArmed(context, p.id, 0L); return@forEach }
             val armedAt = armed(context, p.id)
             if (isMissedButRecent(armedAt, now)) {
+                ScheduleLog.add(context, "Missed start found for “${p.name}” (due ${whenText(armedAt)}) – starting now")
                 startNow(context, p)
                 afterStart(context, store, p, armedAt)
             } else if (schedule(context, p) == null && p.repeat == Repeat.ONCE) {
@@ -139,10 +179,15 @@ object Scheduler {
      */
     fun startNow(context: Context, p: Preset) {
         TimerService.load(context)
-        if (TimerService.isRunning) return
+        if (TimerService.isRunning) {
+            ScheduleLog.add(context, "Skipped “${p.name}”: another timer is running")
+            return
+        }
         try {
             context.startForegroundService(TimerService.startIntent(context, p, scheduled = true))
+            ScheduleLog.add(context, "Started “${p.name}”")
         } catch (e: Exception) {
+            ScheduleLog.add(context, "Phone blocked background start (${e.javaClass.simpleName}) – showed alert")
             showStartNotification(context, p)
         }
     }
@@ -281,9 +326,15 @@ object Scheduler {
     /** Fires at the scheduled time: starts the timer and sets the next alarm. */
     class AlarmReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.getBooleanExtra(EXTRA_TEST, false)) {
+                ScheduleLog.add(context, "Test alarm fired")
+                startNow(context, testPreset(context))
+                return
+            }
             val store = PresetStore(context)
             val p = store.get(intent.getLongExtra(EXTRA_ID, -1L)) ?: return
             if (!p.scheduleOn) return
+            ScheduleLog.add(context, "Alarm fired for “${p.name}”")
             startNow(context, p)
             afterStart(context, store, p, intent.getLongExtra(EXTRA_AT, 0L))
         }
@@ -292,8 +343,10 @@ object Scheduler {
     /** Re-arms schedules after a reboot, app update, or time / time-zone change. */
     class RescheduleReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_BOOT_COMPLETED) ScheduleLog.add(context, "Phone restarted – schedules re-armed")
             scheduleAll(context)
             TimerService.resume(context)   // continue a timer that was running before the restart
+            TimerService.refreshStandby(context)
         }
     }
 }

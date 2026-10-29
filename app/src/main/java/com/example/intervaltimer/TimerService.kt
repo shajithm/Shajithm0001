@@ -48,6 +48,10 @@ class TimerService : Service() {
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
         const val ACTION_TICK = "com.example.intervaltimer.TICK"
         const val ACTION_RESTORE = "com.example.intervaltimer.RESTORE"
+        /** Keep the app alive and ready while a scheduled start is waiting. */
+        const val ACTION_STANDBY = "com.example.intervaltimer.STANDBY"
+        private const val STANDBY_CHANNEL = "standby"
+        private const val DONE_NOTIFICATION_ID = 2
 
         private const val BEEP_MS = 1500L       // built-in beep length
         private const val RINGTONE_MS = 3000L   // how long a chosen ringtone plays each round
@@ -87,6 +91,21 @@ class TimerService : Service() {
         @Volatile private var played = 0
         @Volatile var serviceAlive = false
             private set
+        @Volatile var inStandby = false
+            private set
+
+        /**
+         * Starts (or stops) "stay ready" mode to match the current schedules and setting.
+         * Call from the app, after a reboot, or whenever schedules change.
+         */
+        fun refreshStandby(context: Context) {
+            val needed = AppSettings.stayReady(context) && Scheduler.nextStart(context) != null
+            if (needed || inStandby) {
+                runCatching {
+                    context.startForegroundService(Intent(context, TimerService::class.java).setAction(ACTION_STANDBY))
+                }.onFailure { ScheduleLog.add(context, "Couldn’t start ready mode (${it.javaClass.simpleName})") }
+            }
+        }
 
         val isRunning get() = startedAt != 0L
         val totalMs get() = plan.totalMs
@@ -156,7 +175,12 @@ class TimerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> { stopRun(); return START_NOT_STICKY }
+            ACTION_STOP -> { stopRun(); return if (inStandby) START_STICKY else START_NOT_STICKY }
+            ACTION_STANDBY -> {
+                load(this)
+                if (isRunning) { goForeground(); check(); return START_STICKY }
+                return enterStandbyOrStop()
+            }
             ACTION_START -> {
                 // Always enter the foreground first, as Android requires.
                 goForeground()
@@ -172,8 +196,8 @@ class TimerService : Service() {
             }
             else -> {   // TICK, RESTORE, or a restart by the system (null intent)
                 load(this)
+                if (!isRunning) return enterStandbyOrStop()
                 goForeground()
-                if (!isRunning) { shutdown(keepNotification = false); return START_NOT_STICKY }
                 check()
                 if (!FloatingWindow.appVisible) FloatingWindow.show(this)
             }
@@ -185,6 +209,8 @@ class TimerService : Service() {
         presetName: String, soundUri: String, lengths: List<Long>, scheduled: Boolean,
         showFloating: Boolean, voiceChoice: VoiceChoice,
     ) {
+        inStandby = false
+        handler.removeCallbacks(standbyTick)
         name = presetName
         sound = soundUri
         floating = showFloating
@@ -244,7 +270,7 @@ class TimerService : Service() {
         // Let the final alarm finish sounding before shutting down.
         // Let the final alarm (and announcement) finish before shutting down.
         val wait = if (voiceOn()) RINGTONE_MS + 7_000L else RINGTONE_MS + 500L
-        handler.postDelayed({ shutdown(keepNotification = true) }, wait)
+        handler.postDelayed({ afterRunEnds(keepDone = true) }, wait)
     }
 
     private fun stopRun() {
@@ -253,7 +279,7 @@ class TimerService : Service() {
         clearSaved()
         cancelBoundary()
         FloatingWindow.hide(this)
-        shutdown(keepNotification = false)
+        afterRunEnds(keepDone = false)
     }
 
     // ---------- Round-boundary alarm ----------
@@ -381,7 +407,100 @@ class TimerService : Service() {
 
     // ---------- Lifecycle ----------
 
+    // ---------- Stay ready (standby) ----------
+
+    private var loggedStandbyFor = 0L
+
+    /** Backup check at the scheduled time, in case the alarm itself is late or dropped. */
+    private val standbyTick = Runnable {
+        Scheduler.scheduleAll(this)
+        if (!isRunning) enterStandbyOrStop()
+    }
+
+    /** After a run ends: go back to waiting for the next scheduled start, or stop. */
+    private fun afterRunEnds(keepDone: Boolean) {
+        if (AppSettings.stayReady(this) && Scheduler.nextStart(this) != null) {
+            if (keepDone && finished) {
+                // Keep the "All rounds complete" message as its own notification.
+                getSystemService(NotificationManager::class.java)
+                    .notify(DONE_NOTIFICATION_ID, buildNotification(0L))
+            }
+            releaseRun()
+            enterStandbyOrStop()
+        } else {
+            shutdown(keepNotification = keepDone)
+        }
+    }
+
+    /**
+     * Waits in the foreground with a small silent notification until the next scheduled
+     * start, so the phone can't stop the app in the meantime. Stops if nothing is scheduled.
+     */
+    private fun enterStandbyOrStop(): Int {
+        val next = Scheduler.nextStart(this)
+        val n = standbyNotification(next)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, n)
+            }
+        }
+        if (!AppSettings.stayReady(this) || next == null) {
+            inStandby = false
+            shutdown(keepNotification = false)
+            return START_NOT_STICKY
+        }
+        inStandby = true
+        if (next.second != loggedStandbyFor) {
+            loggedStandbyFor = next.second
+            ScheduleLog.add(this, "Ready – waiting for “${next.first.name}” at ${Scheduler.whenText(next.second)}")
+        }
+        handler.removeCallbacks(standbyTick)
+        val wait = next.second - System.currentTimeMillis() + 2_000L
+        handler.postDelayed(standbyTick, wait.coerceIn(1_000L, 15 * 60_000L))
+        return START_STICKY
+    }
+
+    private fun standbyNotification(next: Pair<Preset, Long>?): Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(STANDBY_CHANNEL, getString(R.string.standby_channel),
+                NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) }
+        )
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val text = next?.let { (p, _) ->
+            p.name + " · " + (Scheduler.nextText(this, p) ?: "")
+        } ?: getString(R.string.app_name)
+        return Notification.Builder(this, STANDBY_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle(getString(R.string.standby_title))
+            .setContentText(text)
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .build()
+    }
+
+    /** Frees everything a run used, without stopping the service. */
+    private fun releaseRun() {
+        handler.removeCallbacksAndMessages(null)
+        ringtone?.stop()
+        ringtone = null
+        announcer?.shutdown()
+        announcer = null
+        tone?.release()
+        tone = null
+        longWakeLock?.takeIf { it.isHeld }?.release()
+        longWakeLock = null
+    }
+
     private fun shutdown(keepNotification: Boolean) {
+        inStandby = false
         handler.removeCallbacksAndMessages(null)
         ringtone?.stop()
         ringtone = null
@@ -397,6 +516,7 @@ class TimerService : Service() {
 
     override fun onDestroy() {
         serviceAlive = false
+        inStandby = false
         handler.removeCallbacksAndMessages(null)
         ringtone?.stop()
         announcer?.shutdown()

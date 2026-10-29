@@ -11,6 +11,12 @@ object AppSettings {
     private const val KEY_DEFAULT_ROUNDS = "default_rounds"
     private const val KEY_FLOAT_X = "float_x"
     private const val KEY_FLOAT_Y = "float_y"
+    private const val KEY_STAY_READY = "stay_ready"
+
+    /** Keep a small silent notification while a scheduled start is waiting (on by default). */
+    fun stayReady(context: Context) = prefs(context).getBoolean(KEY_STAY_READY, true)
+    fun setStayReady(context: Context, on: Boolean) =
+        prefs(context).edit().putBoolean(KEY_STAY_READY, on).apply()
 
     fun floatX(context: Context, default: Int) = prefs(context).getInt(KEY_FLOAT_X, default)
     fun floatY(context: Context, default: Int) = prefs(context).getInt(KEY_FLOAT_Y, default)
