@@ -178,7 +178,10 @@ object FloatingWindow {
             TimerService.isRunning -> {
                 val e = TimerService.elapsed()
                 title.text = TimerService.name.ifBlank { c.getString(R.string.app_name) }
-                roundText.text = c.getString(R.string.float_round, TimerService.currentRound(e), TimerService.rounds)
+                roundText.text = c.getString(
+                    if (TimerService.isPaused) R.string.float_paused else R.string.float_round,
+                    TimerService.currentRound(e), TimerService.rounds)
+                countText.alpha = if (TimerService.isPaused) 0.5f else 1f
                 val t = Durations.clock(TimerService.roundRemaining(e))
                 countText.text = t
                 countText.textSize = if (t.length <= 5) 32f else if (t.length <= 8) 26f else 20f

@@ -46,6 +46,8 @@ class TimerService : Service() {
         const val EXTRA_VOICE = "voice"
         const val ACTION_START = "com.example.intervaltimer.START"
         const val ACTION_STOP = "com.example.intervaltimer.STOP"
+        const val ACTION_PAUSE = "com.example.intervaltimer.PAUSE"
+        const val ACTION_RESUME = "com.example.intervaltimer.RESUME"
         const val ACTION_TICK = "com.example.intervaltimer.TICK"
         const val ACTION_RESTORE = "com.example.intervaltimer.RESTORE"
         /** Keep the app alive and ready while a scheduled start is waiting. */
@@ -108,13 +110,25 @@ class TimerService : Service() {
         }
 
         val isRunning get() = startedAt != 0L
+
+        /** Wall-clock time the run was paused at; 0 when not paused. */
+        @Volatile var pausedAt = 0L
+            private set
+        val isPaused get() = isRunning && pausedAt != 0L
+
+        /** Pause or resume the running timer. */
+        fun togglePause(context: Context) {
+            if (!isRunning) return
+            context.startService(Intent(context, TimerService::class.java)
+                .setAction(if (isPaused) ACTION_RESUME else ACTION_PAUSE))
+        }
         val totalMs get() = plan.totalMs
 
         fun clearFinished() { finished = false }
 
         fun elapsed(): Long =
             if (startedAt == 0L) { if (finished) totalMs else 0L }
-            else (System.currentTimeMillis() - startedAt).coerceIn(0L, totalMs)
+            else ((if (pausedAt != 0L) pausedAt else System.currentTimeMillis()) - startedAt).coerceIn(0L, totalMs)
 
         /** 1-based round currently counting down. */
         fun currentRound(elapsed: Long): Int = plan.current(elapsed)
@@ -143,6 +157,7 @@ class TimerService : Service() {
             })
             played = p.getInt("played", 0)
             finished = false
+            pausedAt = p.getLong("pausedAt", 0L)
             startedAt = p.getLong("start", 0L)
         }
 
@@ -176,6 +191,8 @@ class TimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { stopRun(); return if (inStandby) START_STICKY else START_NOT_STICKY }
+            ACTION_PAUSE -> { load(this); pause(); return START_STICKY }
+            ACTION_RESUME -> { load(this); resume(); return START_STICKY }
             ACTION_STANDBY -> {
                 load(this)
                 if (isRunning) { goForeground(); check(); return START_STICKY }
@@ -211,6 +228,7 @@ class TimerService : Service() {
     ) {
         inStandby = false
         handler.removeCallbacks(standbyTick)
+        pausedAt = 0L
         name = presetName
         sound = soundUri
         floating = showFloating
@@ -240,6 +258,7 @@ class TimerService : Service() {
     private fun check() {
         handler.removeCallbacks(tick)
         if (!isRunning) return
+        if (isPaused) { updateNotification(0L); return }   // clock frozen: no alarms while paused
         val now = System.currentTimeMillis()
         val e = elapsed()
         val due = plan.done(e)
@@ -262,6 +281,7 @@ class TimerService : Service() {
     }
 
     private fun finish() {
+        pausedAt = 0L
         finished = true
         startedAt = 0L
         clearSaved()
@@ -273,7 +293,33 @@ class TimerService : Service() {
         handler.postDelayed({ afterRunEnds(keepDone = true) }, wait)
     }
 
+    // ---------- Pause / resume ----------
+
+    /** Freezes the countdown exactly where it is. */
+    private fun pause() {
+        if (!isRunning || isPaused) return
+        pausedAt = System.currentTimeMillis()
+        save()
+        cancelBoundary()
+        handler.removeCallbacks(tick)
+        handler.removeCallbacks(stopRingtone)
+        ringtone?.stop()
+        updateNotification(0L)
+        announce(getString(R.string.voice_paused), 0L)
+    }
+
+    /** Continues from where it was paused; the paused time is simply skipped. */
+    private fun resume() {
+        if (!isPaused) return
+        startedAt += System.currentTimeMillis() - pausedAt
+        pausedAt = 0L
+        save()
+        announce(getString(R.string.voice_resumed), 0L)
+        check()
+    }
+
     private fun stopRun() {
+        pausedAt = 0L
         startedAt = 0L
         finished = false
         clearSaved()
@@ -398,6 +444,7 @@ class TimerService : Service() {
             .putString("lengths", plan.encode())
             .putLong("start", startedAt)
             .putInt("played", played)
+            .putLong("pausedAt", pausedAt)
             .commit()
     }
 
@@ -556,6 +603,8 @@ class TimerService : Service() {
         )
         val text = when {
             finished -> getString(R.string.done_notification, rounds)
+            isPaused -> getString(R.string.notification_paused,
+                currentRound(elapsed()), rounds, Durations.clock(roundRemaining(elapsed())))
             isRunning -> getString(
                 if (plan.uniform) R.string.notification_round else R.string.notification_round_custom,
                 (played + 1).coerceAtMost(rounds), rounds, Durations.human(plan.lengthOf(played + 1)))
@@ -571,11 +620,21 @@ class TimerService : Service() {
             .setColor(0xFFFF6B4A.toInt())
             .setCategory(Notification.CATEGORY_ALARM)
             .apply {
-                if (isRunning && nextAt > 0L) {
+                if (isRunning && !isPaused && nextAt > 0L) {
                     setWhen(nextAt)
                     setShowWhen(true)
                     setUsesChronometer(true)
                     setChronometerCountDown(true)
+                }
+                if (isRunning) {
+                    val toggle = PendingIntent.getService(
+                        this@TimerService, 3,
+                        Intent(this@TimerService, TimerService::class.java)
+                            .setAction(if (isPaused) ACTION_RESUME else ACTION_PAUSE),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                    addAction(Notification.Action.Builder(null,
+                        getString(if (isPaused) R.string.resume else R.string.pause), toggle).build())
                 }
                 if (!finished) addAction(Notification.Action.Builder(null, getString(R.string.stop), stop).build())
             }

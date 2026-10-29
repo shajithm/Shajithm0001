@@ -124,6 +124,7 @@ class MainActivity : Activity() {
     private lateinit var countdownCaption: TextView
     private lateinit var totalLeft: TextView
     private lateinit var stopButton: TextView
+    private lateinit var pauseButton: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
@@ -244,6 +245,11 @@ class MainActivity : Activity() {
         countdownCaption = findViewById(R.id.countdown_caption)
         totalLeft = findViewById(R.id.total_left)
         stopButton = findViewById(R.id.stop_button)
+        pauseButton = findViewById(R.id.pause_button)
+        pauseButton.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            TimerService.togglePause(this)
+        }
         stopButton.setOnClickListener {
             if (TimerService.isRunning) {
                 startService(Intent(this, TimerService::class.java).setAction(TimerService.ACTION_STOP))
@@ -820,6 +826,8 @@ class MainActivity : Activity() {
             countdownCaption.text = getString(R.string.rounds_done, n)
             totalLeft.text = getString(R.string.total_time, Durations.human(total))
             stopButton.text = getString(R.string.back_to_timers)
+            pauseButton.visibility = View.GONE
+            countdown.alpha = 1f
         } else {
             val remaining = TimerService.roundRemaining(e)
             ring.setRingColor(getColor(R.color.accent))
@@ -828,7 +836,14 @@ class MainActivity : Activity() {
             val text = TimerService.format(remaining)
             countdown.text = text
             countdown.textSize = when { text.length <= 5 -> 68f; text.length <= 8 -> 52f; else -> 36f }
-            countdownCaption.text = getString(R.string.this_round)
+            val paused = TimerService.isPaused
+            countdownCaption.text = getString(if (paused) R.string.paused_caption else R.string.this_round)
+            countdownCaption.setTextColor(getColor(if (paused) R.color.accent else R.color.text_secondary))
+            // Paused: the countdown gently blinks so it's obvious the clock is stopped.
+            countdown.alpha = if (paused && (System.currentTimeMillis() / 600) % 2 == 0L) 0.35f else 1f
+            if (paused) ring.setRingColor(getColor(R.color.text_secondary))
+            pauseButton.visibility = View.VISIBLE
+            pauseButton.text = getString(if (paused) R.string.resume else R.string.pause)
             totalLeft.text = getString(R.string.total_left, TimerService.format(total - e))
             stopButton.text = getString(R.string.stop)
         }
